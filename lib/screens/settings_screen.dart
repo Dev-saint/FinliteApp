@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../theme/theme_provider.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    bool isDarkTheme = false; // пока не подключено
+    final themeProvider = Provider.of<ThemeProvider>(context);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Настройки')),
@@ -13,20 +15,14 @@ class SettingsScreen extends StatelessWidget {
         children: [
           SwitchListTile(
             title: const Text('Тёмная тема'),
-            value: isDarkTheme,
-            onChanged: (_) {
-              // TODO: переключение темы
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Функция в разработке')),
-              );
-            },
+            value: themeProvider.isDark,
+            onChanged: (value) => themeProvider.toggleTheme(value),
           ),
           const Divider(),
           ListTile(
             leading: const Icon(Icons.upload_file),
             title: const Text('Экспорт данных'),
             onTap: () {
-              // TODO: экспорт
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Экспорт ещё не реализован')),
               );
@@ -36,7 +32,6 @@ class SettingsScreen extends StatelessWidget {
             leading: const Icon(Icons.backup),
             title: const Text('Создать резервную копию'),
             onTap: () {
-              // TODO: резервное копирование
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Копирование ещё не реализовано')),
               );
@@ -46,7 +41,6 @@ class SettingsScreen extends StatelessWidget {
             leading: const Icon(Icons.restore),
             title: const Text('Восстановить из копии'),
             onTap: () {
-              // TODO: восстановление
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Восстановление ещё не реализовано')),
               );
