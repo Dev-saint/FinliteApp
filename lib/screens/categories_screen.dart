@@ -15,14 +15,17 @@ class CategoriesScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Категории')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: const [
-          CategoryTile(name: 'Продукты', isDefault: true),
-          CategoryTile(name: 'Транспорт', isDefault: true),
-          CategoryTile(name: 'Развлечения', isDefault: true),
-          CategoryTile(name: 'Зарплата', isDefault: true),
-        ],
+      body: Material(
+        color: Theme.of(context).colorScheme.surface,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: const [
+            CategoryTile(name: 'Продукты', isDefault: true),
+            CategoryTile(name: 'Транспорт', isDefault: true),
+            CategoryTile(name: 'Развлечения', isDefault: true),
+            CategoryTile(name: 'Зарплата', isDefault: true),
+          ],
+        ),
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _openAddCategoryScreen(context),

@@ -6,22 +6,42 @@ final ThemeData lightTheme = ThemeData(
   colorScheme: ColorScheme.fromSeed(
     seedColor: Colors.indigo,
     brightness: Brightness.light,
+  ).copyWith(
+    surface: const Color(0xFFEFF3FA), // вот здесь фон
+    background: const Color(0xFFEFF3FA),
   ),
+  scaffoldBackgroundColor: const Color(0xFFEFF3FA),
   appBarTheme: const AppBarTheme(
-    backgroundColor: Colors.white,
-    foregroundColor: Colors.black87,
+    backgroundColor: Colors.indigo,
+    foregroundColor: Colors.white,
+    centerTitle: true,
+    elevation: 2,
+  ),
+  floatingActionButtonTheme: const FloatingActionButtonThemeData(
+    backgroundColor: Colors.indigo,
+    foregroundColor: Colors.white,
   ),
 );
 
 final ThemeData darkTheme = ThemeData(
   brightness: Brightness.dark,
   useMaterial3: true,
+  scaffoldBackgroundColor: const Color(0xFF121212),
   colorScheme: ColorScheme.fromSeed(
     seedColor: Colors.teal,
     brightness: Brightness.dark,
+  ).copyWith(
+    surface: const Color(0xFF121212),
+    background: const Color(0xFF121212),
   ),
   appBarTheme: const AppBarTheme(
-    backgroundColor: Colors.black,
+    backgroundColor: Colors.teal,
+    foregroundColor: Colors.white,
+    centerTitle: true,
+    elevation: 2,
+  ),
+  floatingActionButtonTheme: const FloatingActionButtonThemeData(
+    backgroundColor: Colors.teal,
     foregroundColor: Colors.white,
   ),
 );
