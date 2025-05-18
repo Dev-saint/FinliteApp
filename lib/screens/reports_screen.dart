@@ -20,7 +20,10 @@ class ReportsScreen extends StatelessWidget {
                       decoration: const InputDecoration(labelText: 'Период'),
                       items: const [
                         DropdownMenuItem(value: 'месяц', child: Text('Месяц')),
-                        DropdownMenuItem(value: 'неделя', child: Text('Неделя')),
+                        DropdownMenuItem(
+                          value: 'неделя',
+                          child: Text('Неделя'),
+                        ),
                         DropdownMenuItem(value: 'год', child: Text('Год')),
                       ],
                       onChanged: (_) {},

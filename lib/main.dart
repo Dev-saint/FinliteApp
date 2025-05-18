@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:animations/animations.dart';
 import 'screens/home_screen.dart';
 import 'screens/categories_screen.dart';
 import 'screens/reports_screen.dart';
@@ -56,10 +57,21 @@ class _MainNavigationState extends State<MainNavigation> {
     });
   }
 
+  PageTransitionSwitcherTransitionBuilder _getTransitionBuilder(int index) {
+    // Для всех вкладок используем FadeTransition
+    return (child, animation, secondaryAnimation) =>
+        FadeTransition(opacity: animation, child: child);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: _screens[_selectedIndex],
+      body: PageTransitionSwitcher(
+        duration: const Duration(milliseconds: 300),
+        reverse: false,
+        transitionBuilder: _getTransitionBuilder(_selectedIndex),
+        child: _screens[_selectedIndex],
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
         onDestinationSelected: _onItemTapped,

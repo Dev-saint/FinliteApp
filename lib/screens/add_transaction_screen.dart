@@ -1,24 +1,37 @@
 import 'package:flutter/material.dart';
 
-class AddTransactionScreen extends StatelessWidget {
+class AddTransactionScreen extends StatefulWidget {
   const AddTransactionScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final _formKey = GlobalKey<FormState>();
-    final _amountController = TextEditingController();
-    final _commentController = TextEditingController();
-    final _timeController = TextEditingController();
-    String? _selectedType;
-    String? _selectedCategory;
-    final List<String> _categories = [
-      'Продукты',
-      'Транспорт',
-      'Развлечения',
-      'Зарплата',
-      'Другое',
-    ];
+  State<AddTransactionScreen> createState() => _AddTransactionScreenState();
+}
 
+class _AddTransactionScreenState extends State<AddTransactionScreen> {
+  final formKey = GlobalKey<FormState>();
+  final amountController = TextEditingController();
+  final commentController = TextEditingController();
+  final timeController = TextEditingController();
+  String? selectedType;
+  String? selectedCategory;
+  final List<String> categories = [
+    'Продукты',
+    'Транспорт',
+    'Развлечения',
+    'Зарплата',
+    'Другое',
+  ];
+
+  @override
+  void dispose() {
+    amountController.dispose();
+    commentController.dispose();
+    timeController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Добавить операцию')),
       body: Material(
@@ -26,7 +39,7 @@ class AddTransactionScreen extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Form(
-            key: _formKey,
+            key: formKey,
             child: Column(
               children: [
                 DropdownButtonFormField<String>(
@@ -35,15 +48,17 @@ class AddTransactionScreen extends StatelessWidget {
                     DropdownMenuItem(value: 'доход', child: Text('Доход')),
                     DropdownMenuItem(value: 'расход', child: Text('Расход')),
                   ],
-                  value: _selectedType,
+                  value: selectedType,
                   onChanged: (value) {
-                    _selectedType = value;
+                    setState(() {
+                      selectedType = value;
+                    });
                   },
                   validator: (value) => value == null ? 'Выберите тип' : null,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
-                  controller: _amountController,
+                  controller: amountController,
                   decoration: const InputDecoration(labelText: 'Сумма'),
                   keyboardType: TextInputType.number,
                   validator:
@@ -56,22 +71,24 @@ class AddTransactionScreen extends StatelessWidget {
                 DropdownButtonFormField<String>(
                   decoration: const InputDecoration(labelText: 'Категория'),
                   items:
-                      _categories
+                      categories
                           .map(
                             (cat) =>
                                 DropdownMenuItem(value: cat, child: Text(cat)),
                           )
                           .toList(),
-                  value: _selectedCategory,
+                  value: selectedCategory,
                   onChanged: (value) {
-                    _selectedCategory = value;
+                    setState(() {
+                      selectedCategory = value;
+                    });
                   },
                   validator:
                       (value) => value == null ? 'Выберите категорию' : null,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
-                  controller: _timeController,
+                  controller: timeController,
                   decoration: const InputDecoration(
                     labelText: 'Время (например, 14:30)',
                   ),
@@ -83,14 +100,14 @@ class AddTransactionScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
-                  controller: _commentController,
+                  controller: commentController,
                   decoration: const InputDecoration(labelText: 'Комментарий'),
                   maxLines: 2,
                 ),
                 const SizedBox(height: 24),
                 ElevatedButton(
                   onPressed: () {
-                    if (_formKey.currentState?.validate() ?? false) {
+                    if (formKey.currentState?.validate() ?? false) {
                       Navigator.pop(context); // Здесь можно добавить сохранение
                     }
                   },

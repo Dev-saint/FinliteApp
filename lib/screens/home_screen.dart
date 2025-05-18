@@ -5,31 +5,53 @@ import 'transaction_details_screen.dart';
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
+  // Добавлено: функция для получения иконки по категории
+  IconData _getCategoryIcon(String category) {
+    switch (category) {
+      case 'Продукты':
+        return Icons.shopping_cart;
+      case 'Транспорт':
+        return Icons.directions_car;
+      case 'Развлечения':
+        return Icons.movie;
+      case 'Зарплата':
+        return Icons.attach_money;
+      default:
+        return Icons.label;
+    }
+  }
+
   void _openAddTransactionScreen(BuildContext context) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const AddTransactionScreen()),
-    );
+    Navigator.of(context).push(_fadeRoute(const AddTransactionScreen()));
   }
 
   void _openTransactionDetailsScreen(
     BuildContext context,
     TransactionCard card,
   ) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder:
-            (_) => TransactionDetailsScreen(
-              icon: card.icon,
-              title: card.title,
-              subtitle: card.subtitle,
-              amount: card.amount,
-              color: card.color,
-              category: card.category,
-              comment: card.comment,
-            ),
+    Navigator.of(context).push(
+      _fadeRoute(
+        TransactionDetailsScreen(
+          icon: _getCategoryIcon(card.category),
+          title: card.title,
+          subtitle: card.subtitle,
+          amount: card.amount,
+          color: card.color,
+          category: card.category,
+          comment: card.comment,
+        ),
       ),
+    );
+  }
+
+  // Добавлено: универсальный fade route
+  PageRouteBuilder _fadeRoute(Widget page) {
+    return PageRouteBuilder(
+      pageBuilder: (context, animation, secondaryAnimation) => page,
+      transitionsBuilder:
+          (context, animation, secondaryAnimation, child) =>
+              FadeTransition(opacity: animation, child: child),
+      transitionDuration: const Duration(milliseconds: 220),
     );
   }
 
@@ -84,28 +106,29 @@ class HomeScreen extends StatelessWidget {
                 child: ListView(
                   children: [
                     TransactionCard(
-                      icon: Icons.arrow_upward,
+                      // icon теперь не нужен, вычисляется внутри TransactionCard
+                      category: 'Продукты',
                       title: 'Продукты',
                       subtitle: '12 мая 2025, 14:30',
                       amount: '-650 ₽',
                       color: Colors.redAccent,
-                      category: 'Продукты',
                       comment: 'Покупка в супермаркете',
                       onTap:
                           (context, card) =>
                               _openTransactionDetailsScreen(context, card),
+                      getCategoryIcon: _getCategoryIcon, // передаём функцию
                     ),
                     TransactionCard(
-                      icon: Icons.arrow_downward,
+                      category: 'Зарплата',
                       title: 'Зарплата',
                       subtitle: '10 мая 2025, 09:00',
                       amount: '+15000 ₽',
                       color: Colors.green,
-                      category: 'Зарплата',
                       comment: 'Майская зарплата',
                       onTap:
                           (context, card) =>
                               _openTransactionDetailsScreen(context, card),
+                      getCategoryIcon: _getCategoryIcon,
                     ),
                   ],
                 ),
@@ -122,36 +145,42 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
+// Обновлённый TransactionCard
 class TransactionCard extends StatelessWidget {
-  final IconData icon;
+  // icon убран, добавлена функция для получения иконки
+  final String category;
   final String title;
-  final String subtitle; // теперь дата и время в одной строке
+  final String subtitle;
   final String amount;
   final Color color;
-  final String category;
   final String comment;
   final void Function(BuildContext, TransactionCard)? onTap;
+  final IconData Function(String)? getCategoryIcon;
 
   const TransactionCard({
     super.key,
-    required this.icon,
+    required this.category,
     required this.title,
     required this.subtitle,
     required this.amount,
     required this.color,
-    required this.category,
     required this.comment,
     this.onTap,
+    this.getCategoryIcon,
   });
 
   @override
   Widget build(BuildContext context) {
+    // Используем иконку по категории
+    final icon =
+        getCategoryIcon != null ? getCategoryIcon!(category) : Icons.label;
+    Widget leadingIcon = Icon(icon, color: color);
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       elevation: 2,
       child: ListTile(
-        leading: Icon(icon, color: color),
+        leading: leadingIcon,
         title: Text(title),
         subtitle: Text(subtitle),
         trailing: Text(

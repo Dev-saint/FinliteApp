@@ -20,18 +20,39 @@ class TransactionDetailsScreen extends StatelessWidget {
     required this.comment,
   });
 
+  // Локальная функция для получения иконки по категории
+  IconData _getCategoryIcon(String category) {
+    switch (category) {
+      case 'Продукты':
+        return Icons.shopping_cart;
+      case 'Транспорт':
+        return Icons.directions_car;
+      case 'Развлечения':
+        return Icons.movie;
+      case 'Зарплата':
+        return Icons.attach_money;
+      default:
+        return Icons.label;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Используем иконку по категории
+    final categoryIcon = _getCategoryIcon(category);
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    Widget iconWidget = Icon(categoryIcon, color: color, size: 48);
     return Scaffold(
       appBar: AppBar(title: const Text('Детали операции')),
       body: Material(
-        color: Theme.of(context).colorScheme.surface,
+        color: colorScheme.surface,
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Icon(icon, color: color, size: 48),
+              iconWidget,
               const SizedBox(height: 24),
               Text(title, style: Theme.of(context).textTheme.headlineSmall),
               const SizedBox(height: 8),
@@ -61,9 +82,17 @@ class TransactionDetailsScreen extends StatelessWidget {
                 padding: const EdgeInsets.all(16),
                 margin: const EdgeInsets.only(bottom: 16),
                 decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
+                  color:
+                      isDark
+                          ? colorScheme.surfaceContainerLow
+                          : colorScheme.primary.withOpacity(0.05),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blueAccent.withOpacity(0.3)),
+                  border: Border.all(
+                    color:
+                        isDark
+                            ? colorScheme.primary.withOpacity(0.25)
+                            : Colors.blueAccent.withOpacity(0.3),
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,

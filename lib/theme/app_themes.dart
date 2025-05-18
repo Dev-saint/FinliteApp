@@ -6,10 +6,7 @@ final ThemeData lightTheme = ThemeData(
   colorScheme: ColorScheme.fromSeed(
     seedColor: Colors.indigo,
     brightness: Brightness.light,
-  ).copyWith(
-    surface: const Color(0xFFEFF3FA), // вот здесь фон
-    background: const Color(0xFFEFF3FA),
-  ),
+  ).copyWith(surface: const Color(0xFFEFF3FA)),
   scaffoldBackgroundColor: const Color(0xFFEFF3FA),
   appBarTheme: const AppBarTheme(
     backgroundColor: Colors.indigo,
@@ -30,10 +27,7 @@ final ThemeData darkTheme = ThemeData(
   colorScheme: ColorScheme.fromSeed(
     seedColor: Colors.teal,
     brightness: Brightness.dark,
-  ).copyWith(
-    surface: const Color(0xFF121212),
-    background: const Color(0xFF121212),
-  ),
+  ).copyWith(surface: const Color(0xFF121212)),
   appBarTheme: const AppBarTheme(
     backgroundColor: Colors.teal,
     foregroundColor: Colors.white,
