@@ -18,10 +18,10 @@ class CategoriesScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: const [
-          CategoryTile(name: 'Продукты'),
-          CategoryTile(name: 'Транспорт'),
-          CategoryTile(name: 'Развлечения'),
-          CategoryTile(name: 'Зарплата'),
+          CategoryTile(name: 'Продукты', isDefault: true),
+          CategoryTile(name: 'Транспорт', isDefault: true),
+          CategoryTile(name: 'Развлечения', isDefault: true),
+          CategoryTile(name: 'Зарплата', isDefault: true),
         ],
       ),
       floatingActionButton: FloatingActionButton(
@@ -34,21 +34,28 @@ class CategoriesScreen extends StatelessWidget {
 
 class CategoryTile extends StatelessWidget {
   final String name;
+  final bool isDefault;
 
-  const CategoryTile({super.key, required this.name});
+  const CategoryTile({
+    super.key,
+    required this.name,
+    this.isDefault = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     return ListTile(
       leading: const Icon(Icons.label),
       title: Text(name),
-      trailing: Wrap(
-        spacing: 8,
-        children: const [
-          Icon(Icons.edit, color: Colors.grey),
-          Icon(Icons.delete, color: Colors.redAccent),
-        ],
-      ),
+      trailing: isDefault
+          ? null
+          : Wrap(
+              spacing: 8,
+              children: const [
+                Icon(Icons.edit, color: Colors.grey),
+                Icon(Icons.delete, color: Colors.redAccent),
+              ],
+            ),
     );
   }
 }
