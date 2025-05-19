@@ -1,5 +1,5 @@
-import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 class DatabaseService {
   static Database? _db;
@@ -11,6 +11,11 @@ class DatabaseService {
   }
 
   static Future<Database> _initDb() async {
+    // Инициализация databaseFactory для тестовой среды
+    if (databaseFactory != databaseFactoryFfi) {
+      databaseFactory = databaseFactoryFfi;
+    }
+
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, 'finlite.db');
     return await openDatabase(

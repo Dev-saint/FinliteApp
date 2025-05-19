@@ -7,10 +7,10 @@ class CategoriesScreen extends StatefulWidget {
   const CategoriesScreen({super.key});
 
   @override
-  _CategoriesScreenState createState() => _CategoriesScreenState();
+  CategoriesScreenState createState() => CategoriesScreenState();
 }
 
-class _CategoriesScreenState extends State<CategoriesScreen> {
+class CategoriesScreenState extends State<CategoriesScreen> {
   final List<CategoryTile> categories = [];
 
   @override
