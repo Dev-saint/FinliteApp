@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'transaction_details_screen.dart';
 import 'edit_account_screen.dart';
 import '../models/account.dart';
+import '../services/database_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -37,6 +38,31 @@ class _HomeScreenState extends State<HomeScreen> {
       comment: 'Майская зарплата',
     ),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTransactions();
+  }
+
+  Future<void> _loadTransactions() async {
+    final data = await DatabaseService.getAllTransactions();
+    setState(() {
+      transactions.clear();
+      transactions.addAll(
+        data.map(
+          (t) => _TransactionData(
+            category: t['category'],
+            title: t['title'] ?? 'Без названия',
+            subtitle: t['date'],
+            amount: t['amount'],
+            color: t['amount'] > 0 ? Colors.green : Colors.redAccent,
+            comment: t['comment'] ?? '',
+          ),
+        ),
+      );
+    });
+  }
 
   // Получить иконку по категории
   IconData _getCategoryIcon(String category) {

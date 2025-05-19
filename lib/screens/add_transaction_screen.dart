@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/database_service.dart';
 
 class AddTransactionScreen extends StatefulWidget {
   const AddTransactionScreen({super.key});
@@ -85,6 +86,20 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     return '$day $month $year, $hour:$minute';
   }
 
+  Future<void> _saveTransaction() async {
+    if (formKey.currentState?.validate() ?? false) {
+      final transaction = {
+        'amount': int.parse(amountController.text),
+        'type': selectedType,
+        'category': selectedCategory,
+        'date': selectedDateTime?.toIso8601String(),
+        'comment': commentController.text,
+      };
+      await DatabaseService.insertTransaction(transaction);
+      Navigator.pop(context, true); // Возвращаем true при сохранении
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -167,14 +182,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 ),
                 const SizedBox(height: 24),
                 ElevatedButton(
-                  onPressed: () {
-                    if (formKey.currentState?.validate() ?? false) {
-                      Navigator.pop(
-                        context,
-                        true,
-                      ); // Возвращаем true при сохранении
-                    }
-                  },
+                  onPressed: _saveTransaction,
                   child: const Text('Сохранить'),
                 ),
               ],
