@@ -8,9 +8,11 @@ class AddCategoryScreen extends StatefulWidget {
 }
 
 class _AddCategoryScreenState extends State<AddCategoryScreen> {
+  final _formKey = GlobalKey<FormState>();
   final TextEditingController controller = TextEditingController();
   IconData? _selectedIcon;
   String? _customIconPath;
+  String _selectedType = 'расход'; // Добавлено: тип категории
 
   static const List<IconData> _iconOptions = [
     Icons.shopping_cart,
@@ -44,108 +46,140 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
         color: Theme.of(context).colorScheme.surface,
         child: Padding(
           padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              TextFormField(
-                controller: controller,
-                decoration: const InputDecoration(
-                  labelText: 'Название категории',
-                ),
-              ),
-              const SizedBox(height: 16),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Иконка',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 12,
-                children:
-                    _iconOptions.map((icon) {
-                      final isSelected =
-                          _selectedIcon == icon && _customIconPath == null;
-                      return GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            _selectedIcon = icon;
-                            _customIconPath = null;
-                          });
-                        },
-                        child: CircleAvatar(
-                          backgroundColor:
-                              isSelected
-                                  ? Theme.of(
-                                    context,
-                                  ).colorScheme.primary.withOpacity(0.2)
-                                  : Colors.grey.shade200,
-                          child: Icon(
-                            icon,
-                            color:
-                                isSelected
-                                    ? Theme.of(context).colorScheme.primary
-                                    : Colors.black54,
-                          ),
-                        ),
-                      );
-                    }).toList(),
-              ),
-              const SizedBox(height: 16),
-              Center(
-                child: Column(
+          child: Form(
+            key: _formKey,
+            child: Column(
+              children: [
+                // --- Новый блок выбора типа категории ---
+                Row(
                   children: [
-                    ElevatedButton.icon(
-                      onPressed: () async {
-                        await _pickCustomIcon();
-                        setState(() {
-                          _selectedIcon = null;
-                          // _customIconPath уже обновлён
-                        });
+                    const Text('Тип: ', style: TextStyle(fontSize: 16)),
+                    const SizedBox(width: 12),
+                    DropdownButton<String>(
+                      value: _selectedType,
+                      items: const [
+                        DropdownMenuItem(value: 'доход', child: Text('Доход')),
+                        DropdownMenuItem(
+                          value: 'расход',
+                          child: Text('Расход'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() => _selectedType = value);
+                        }
                       },
-                      icon: const Icon(Icons.add_photo_alternate),
-                      label: const Text('Загрузить свою иконку'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 12,
-                        ),
-                      ),
                     ),
-                    if (_customIconPath != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 12),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child:
-                              _customIconPath!.startsWith('assets/')
-                                  ? Image.asset(
-                                    _customIconPath!,
-                                    width: 48,
-                                    height: 48,
-                                    fit: BoxFit.cover,
-                                  )
-                                  : Icon(
-                                    Icons.image,
-                                    size: 48,
-                                    color:
-                                        Theme.of(context).colorScheme.primary,
-                                  ), // заглушка для не-ассетных
-                        ),
-                      ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton(
-                onPressed: () {
-                  // TODO: сохранить категорию с выбранной иконкой или customIconPath
-                  Navigator.pop(context);
-                },
-                child: const Text('Сохранить'),
-              ),
-            ],
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: controller,
+                  decoration: const InputDecoration(
+                    labelText: 'Название категории',
+                  ),
+                  validator:
+                      (value) =>
+                          value == null || value.trim().isEmpty
+                              ? 'Введите название категории'
+                              : null,
+                ),
+                const SizedBox(height: 16),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Иконка',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 12,
+                  children:
+                      _iconOptions.map((icon) {
+                        final isSelected =
+                            _selectedIcon == icon && _customIconPath == null;
+                        return GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _selectedIcon = icon;
+                              _customIconPath = null;
+                            });
+                          },
+                          child: CircleAvatar(
+                            backgroundColor:
+                                isSelected
+                                    ? Theme.of(context).colorScheme.primary
+                                        .withAlpha((0.2 * 255).toInt())
+                                    : Colors.grey.shade200,
+                            child: Icon(
+                              icon,
+                              color:
+                                  isSelected
+                                      ? Theme.of(context).colorScheme.primary
+                                      : Colors.black54,
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                ),
+                const SizedBox(height: 16),
+                Center(
+                  child: Column(
+                    children: [
+                      ElevatedButton.icon(
+                        onPressed: () async {
+                          await _pickCustomIcon();
+                          setState(() {
+                            _selectedIcon = null;
+                            // _customIconPath уже обновлён
+                          });
+                        },
+                        icon: const Icon(Icons.add_photo_alternate),
+                        label: const Text('Загрузить свою иконку'),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                        ),
+                      ),
+                      if (_customIconPath != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child:
+                                _customIconPath!.startsWith('assets/')
+                                    ? Image.asset(
+                                      _customIconPath!,
+                                      width: 48,
+                                      height: 48,
+                                      fit: BoxFit.cover,
+                                    )
+                                    : Icon(
+                                      Icons.image,
+                                      size: 48,
+                                      color:
+                                          Theme.of(context).colorScheme.primary,
+                                    ), // заглушка для не-ассетных
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton(
+                  onPressed: () {
+                    if (_formKey.currentState?.validate() ?? false) {
+                      // TODO: сохранить категорию с выбранной иконкой или customIconPath
+                      Navigator.pop(context);
+                    }
+                  },
+                  child: const Text('Сохранить'),
+                ),
+              ],
+            ),
           ),
         ),
       ),

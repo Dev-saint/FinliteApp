@@ -14,6 +14,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   final timeController = TextEditingController();
   String? selectedType;
   String? selectedCategory;
+  DateTime? selectedDateTime;
   final List<String> categories = [
     'Продукты',
     'Транспорт',
@@ -28,6 +29,60 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     commentController.dispose();
     timeController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickDateTime(BuildContext context) async {
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      initialDate: selectedDateTime ?? now,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (!mounted) return;
+    if (date != null) {
+      final time = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay.fromDateTime(selectedDateTime ?? now),
+      );
+      if (!mounted) return;
+      if (time != null) {
+        setState(() {
+          selectedDateTime = DateTime(
+            date.year,
+            date.month,
+            date.day,
+            time.hour,
+            time.minute,
+          );
+          timeController.text = _formatDateTime(selectedDateTime!);
+        });
+      }
+    }
+  }
+
+  String _formatDateTime(DateTime dateTime) {
+    const months = [
+      '',
+      'января',
+      'февраля',
+      'марта',
+      'апреля',
+      'мая',
+      'июня',
+      'июля',
+      'августа',
+      'сентября',
+      'октября',
+      'ноября',
+      'декабря',
+    ];
+    final day = dateTime.day;
+    final month = months[dateTime.month];
+    final year = dateTime.year;
+    final hour = dateTime.hour.toString().padLeft(2, '0');
+    final minute = dateTime.minute.toString().padLeft(2, '0');
+    return '$day $month $year, $hour:$minute';
   }
 
   @override
@@ -87,16 +142,22 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                       (value) => value == null ? 'Выберите категорию' : null,
                 ),
                 const SizedBox(height: 12),
-                TextFormField(
-                  controller: timeController,
-                  decoration: const InputDecoration(
-                    labelText: 'Время (например, 14:30)',
+                GestureDetector(
+                  onTap: () => _pickDateTime(context),
+                  child: AbsorbPointer(
+                    child: TextFormField(
+                      controller: timeController,
+                      decoration: const InputDecoration(
+                        labelText: 'Дата и время',
+                        suffixIcon: Icon(Icons.calendar_today),
+                      ),
+                      validator:
+                          (value) =>
+                              value == null || value.isEmpty
+                                  ? 'Выберите дату и время'
+                                  : null,
+                    ),
                   ),
-                  validator:
-                      (value) =>
-                          value == null || value.isEmpty
-                              ? 'Введите время'
-                              : null,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
@@ -108,7 +169,10 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 ElevatedButton(
                   onPressed: () {
                     if (formKey.currentState?.validate() ?? false) {
-                      Navigator.pop(context); // Здесь можно добавить сохранение
+                      Navigator.pop(
+                        context,
+                        true,
+                      ); // Возвращаем true при сохранении
                     }
                   },
                   child: const Text('Сохранить'),

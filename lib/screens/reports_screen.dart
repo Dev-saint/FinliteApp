@@ -211,7 +211,10 @@ class _PieChartWidget extends StatelessWidget {
                 color: Colors.black87,
                 fontWeight: FontWeight.bold,
                 shadows: [
-                  Shadow(color: Colors.white.withOpacity(0.7), blurRadius: 4),
+                  Shadow(
+                    color: Colors.white.withAlpha((0.7 * 255).toInt()),
+                    blurRadius: 4,
+                  ),
                 ],
               ),
             ),

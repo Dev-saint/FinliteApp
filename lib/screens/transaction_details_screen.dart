@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-class TransactionDetailsScreen extends StatelessWidget {
+class TransactionDetailsScreen extends StatefulWidget {
   final IconData icon;
   final String title;
   final String subtitle;
@@ -20,7 +20,115 @@ class TransactionDetailsScreen extends StatelessWidget {
     required this.comment,
   });
 
-  // Локальная функция для получения иконки по категории
+  @override
+  State<TransactionDetailsScreen> createState() =>
+      _TransactionDetailsScreenState();
+}
+
+class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
+  bool _isEditing = false;
+  final _formKey = GlobalKey<FormState>();
+  late TextEditingController _titleController;
+  late TextEditingController _subtitleController;
+  late TextEditingController _amountController;
+  late TextEditingController _commentController;
+  late String _category;
+  late Color _color;
+  DateTime? _selectedDateTime;
+
+  @override
+  void initState() {
+    super.initState();
+    _titleController = TextEditingController(text: widget.title);
+    _subtitleController = TextEditingController(text: widget.subtitle);
+    _amountController = TextEditingController(
+      text:
+          widget.amount
+              .replaceAll('₽', '')
+              .replaceAll('+', '')
+              .replaceAll('-', '')
+              .trim(),
+    );
+    _commentController = TextEditingController(text: widget.comment);
+    _category = widget.category;
+    _color = widget.color;
+    // Попытка парсить дату из subtitle
+    _selectedDateTime = _tryParseDateTime(widget.subtitle);
+  }
+
+  DateTime? _tryParseDateTime(String text) {
+    // Ожидается формат "12 мая 2025, 14:30"
+    try {
+      final parts = text.split(',');
+      if (parts.length == 2) {
+        final datePart = parts[0].trim();
+        final timePart = parts[1].trim();
+        final months = {
+          'января': 1,
+          'февраля': 2,
+          'марта': 3,
+          'апреля': 4,
+          'мая': 5,
+          'июня': 6,
+          'июля': 7,
+          'августа': 8,
+          'сентября': 9,
+          'октября': 10,
+          'ноября': 11,
+          'декабря': 12,
+        };
+        final dateMatch = RegExp(
+          r'(\d{1,2}) (\w+) (\d{4})',
+        ).firstMatch(datePart);
+        if (dateMatch != null) {
+          final day = int.parse(dateMatch.group(1)!);
+          final month = months[dateMatch.group(2)!] ?? 1;
+          final year = int.parse(dateMatch.group(3)!);
+          final timeMatch = RegExp(r'(\d{1,2}):(\d{2})').firstMatch(timePart);
+          if (timeMatch != null) {
+            final hour = int.parse(timeMatch.group(1)!);
+            final minute = int.parse(timeMatch.group(2)!);
+            return DateTime(year, month, day, hour, minute);
+          }
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  String _formatDateTime(DateTime dateTime) {
+    const months = [
+      '',
+      'января',
+      'февраля',
+      'марта',
+      'апреля',
+      'мая',
+      'июня',
+      'июля',
+      'августа',
+      'сентября',
+      'октября',
+      'ноября',
+      'декабря',
+    ];
+    final day = dateTime.day;
+    final month = months[dateTime.month];
+    final year = dateTime.year;
+    final hour = dateTime.hour.toString().padLeft(2, '0');
+    final minute = dateTime.minute.toString().padLeft(2, '0');
+    return '$day $month $year, $hour:$minute';
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _subtitleController.dispose();
+    _amountController.dispose();
+    _commentController.dispose();
+    super.dispose();
+  }
+
   IconData _getCategoryIcon(String category) {
     switch (category) {
       case 'Продукты':
@@ -36,91 +144,315 @@ class TransactionDetailsScreen extends StatelessWidget {
     }
   }
 
+  Color _getCategoryColor(String category) {
+    switch (category) {
+      case 'Продукты':
+        return Colors.redAccent;
+      case 'Зарплата':
+        return Colors.green;
+      case 'Транспорт':
+        return Colors.blue;
+      case 'Развлечения':
+        return Colors.orange;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  void _startEdit() {
+    setState(() {
+      _isEditing = true;
+    });
+  }
+
+  Future<void> _pickDateTime(BuildContext context) async {
+    final now = DateTime.now();
+    final initialDate = _selectedDateTime ?? now;
+    final date = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (!mounted) return;
+    if (date != null) {
+      // Only use context after mounted check
+      final time = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay.fromDateTime(_selectedDateTime ?? now),
+      );
+      if (!mounted) return;
+      if (time != null) {
+        setState(() {
+          _selectedDateTime = DateTime(
+            date.year,
+            date.month,
+            date.day,
+            time.hour,
+            time.minute,
+          );
+          _subtitleController.text = _formatDateTime(_selectedDateTime!);
+        });
+      }
+    }
+  }
+
+  void _saveEdit() {
+    if (!mounted) return;
+    if (_formKey.currentState?.validate() ?? false) {
+      setState(() {
+        _isEditing = false;
+        _category = _category;
+        _color = _getCategoryColor(_category);
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Изменения сохранены')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Используем иконку по категории
-    final categoryIcon = _getCategoryIcon(category);
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    Widget iconWidget = Icon(categoryIcon, color: color, size: 48);
+    final iconWidget = Icon(
+      _getCategoryIcon(_category),
+      color: _color,
+      size: 48,
+    );
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Детали операции')),
+      appBar: AppBar(
+        title: const Text('Детали операции'),
+        leading: IconButton(
+          icon: Icon(_isEditing ? Icons.close : Icons.arrow_back),
+          tooltip: _isEditing ? 'Отмена' : 'Назад',
+          onPressed: () {
+            if (_isEditing) {
+              setState(() {
+                _isEditing = false;
+              });
+            } else {
+              Navigator.pop(context);
+            }
+          },
+        ),
+      ),
       body: Material(
         color: colorScheme.surface,
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              iconWidget,
-              const SizedBox(height: 24),
-              Text(title, style: Theme.of(context).textTheme.headlineSmall),
-              const SizedBox(height: 8),
-              Text(
-                subtitle,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(color: Colors.grey),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Категория: $category',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 24),
-              Text(
-                amount,
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  color: color,
-                ),
-              ),
-              const SizedBox(height: 24),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                  color:
-                      isDark
-                          ? colorScheme.surfaceContainerLow
-                          : colorScheme.primary.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color:
-                        isDark
-                            ? colorScheme.primary.withOpacity(0.25)
-                            : Colors.blueAccent.withOpacity(0.3),
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Комментарий',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                iconWidget,
+                const SizedBox(height: 24),
+                _isEditing
+                    ? TextFormField(
+                      controller: _titleController,
+                      decoration: const InputDecoration(labelText: 'Название'),
+                      validator:
+                          (value) =>
+                              value == null || value.trim().isEmpty
+                                  ? 'Введите название'
+                                  : null,
+                    )
+                    : Text(
+                      _titleController.text,
+                      style: Theme.of(context).textTheme.headlineSmall,
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      comment.isNotEmpty ? comment : 'Нет комментария',
+                const SizedBox(height: 8),
+                _isEditing
+                    ? GestureDetector(
+                      onTap: () => _pickDateTime(context),
+                      child: AbsorbPointer(
+                        child: TextFormField(
+                          controller: _subtitleController,
+                          decoration: const InputDecoration(
+                            labelText: 'Дата и время',
+                            suffixIcon: Icon(Icons.calendar_today),
+                          ),
+                          validator:
+                              (value) =>
+                                  value == null || value.trim().isEmpty
+                                      ? 'Выберите дату и время'
+                                      : null,
+                        ),
+                      ),
+                    )
+                    : Text(
+                      _subtitleController.text,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodyMedium?.copyWith(color: Colors.grey),
+                    ),
+                const SizedBox(height: 8),
+                _isEditing
+                    ? DropdownButtonFormField<String>(
+                      value: _category,
+                      decoration: const InputDecoration(labelText: 'Категория'),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'Продукты',
+                          child: Text('Продукты'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'Транспорт',
+                          child: Text('Транспорт'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'Развлечения',
+                          child: Text('Развлечения'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'Зарплата',
+                          child: Text('Зарплата'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'Другое',
+                          child: Text('Другое'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() {
+                            _category = value;
+                            _color = _getCategoryColor(_category);
+                          });
+                        }
+                      },
+                      validator:
+                          (value) =>
+                              value == null || value.isEmpty
+                                  ? 'Выберите категорию'
+                                  : null,
+                    )
+                    : Text(
+                      'Категория: $_category',
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
-                  ],
+                const SizedBox(height: 24),
+                _isEditing
+                    ? TextFormField(
+                      controller: _amountController,
+                      decoration: const InputDecoration(labelText: 'Сумма'),
+                      keyboardType: TextInputType.number,
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'Введите сумму';
+                        }
+                        final num? parsed = num.tryParse(value);
+                        if (parsed == null) return 'Некорректная сумма';
+                        return null;
+                      },
+                    )
+                    : Text(
+                      widget.amount,
+                      style: TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                        color: _color,
+                      ),
+                    ),
+                const SizedBox(height: 24),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color:
+                        isDark
+                            ? colorScheme.surfaceContainerLow
+                            : colorScheme.primary.withAlpha(
+                              (0.05 * 255).toInt(),
+                            ),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color:
+                          isDark
+                              ? colorScheme.primary.withAlpha(
+                                (0.25 * 255).toInt(),
+                              )
+                              : Colors.blueAccent.withAlpha(
+                                (0.3 * 255).toInt(),
+                              ),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Комментарий',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 6),
+                      _isEditing
+                          ? TextFormField(
+                            controller: _commentController,
+                            decoration: const InputDecoration(
+                              labelText: 'Комментарий',
+                            ),
+                            maxLines: 2,
+                          )
+                          : Text(
+                            _commentController.text.isNotEmpty
+                                ? _commentController.text
+                                : 'Нет комментария',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                    ],
+                  ),
                 ),
-              ),
-              const Spacer(),
-              ElevatedButton.icon(
-                onPressed: () => Navigator.pop(context),
-                icon: const Icon(Icons.arrow_back),
-                label: const Text('Назад'),
-                style: ElevatedButton.styleFrom(
-                  minimumSize: const Size.fromHeight(48),
+                const Spacer(),
+                if (!_isEditing)
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _startEdit,
+                      icon: const Icon(Icons.edit),
+                      label: const Text('Редактировать'),
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(48),
+                      ),
+                    ),
+                  ),
+                if (_isEditing)
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _saveEdit,
+                      icon: const Icon(Icons.save),
+                      label: const Text('Сохранить'),
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(48),
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      if (_isEditing) {
+                        setState(() {
+                          _isEditing = false;
+                        });
+                      } else {
+                        Navigator.pop(context);
+                      }
+                    },
+                    icon: Icon(_isEditing ? Icons.close : Icons.arrow_back),
+                    label: Text(_isEditing ? 'Отмена' : 'Назад'),
+                    style: ElevatedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                    ),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
