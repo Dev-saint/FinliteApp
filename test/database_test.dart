@@ -2,9 +2,19 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:finlite_app/services/database_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:logging/logging.dart';
 
 void main() {
-  setUpAll(() async {
+  // Настройка логирования
+  Logger.root.level = Level.ALL;
+  Logger.root.onRecord.listen((record) {
+    // Можно настроить вывод логов в консоль или файл
+    Logger(
+      'DatabaseTestLogger',
+    ).log(record.level, '${record.time}: ${record.message}');
+  });
+
+  setUpAll(() {
     // Инициализация databaseFactory для тестовой среды
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
@@ -39,8 +49,10 @@ void main() {
         'comment': 'Покупка продуктов',
       };
       await DatabaseService.insertTransaction(transaction);
-
-      // Получаем все транзакции
+      // Логируем сообщение об успешном тесте
+      Logger(
+        'DatabaseTest',
+      ).info('Тест "Insert and retrieve a transaction" успешно пройден.');
       final transactions = await DatabaseService.getAllTransactions();
 
       // Проверяем, что транзакция добавлена
@@ -49,7 +61,9 @@ void main() {
       expect(transactions.first['amount'], transaction['amount']);
 
       // Выводим сообщение об успешном тесте
-      print('Тест "Insert and retrieve a transaction" успешно пройден.');
+      Logger(
+        'DatabaseTest',
+      ).info('Тест "Insert and retrieve a transaction" успешно пройден.');
     });
 
     test('Insert and retrieve a category', () async {

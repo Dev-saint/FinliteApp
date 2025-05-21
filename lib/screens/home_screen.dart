@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'transaction_details_screen.dart';
 import 'edit_account_screen.dart';
+import 'add_transaction_screen.dart'; // Добавлен импорт
 import '../models/account.dart';
 import '../services/database_service.dart';
 
@@ -19,30 +20,19 @@ class _HomeScreenState extends State<HomeScreen> {
   ];
   int selectedAccountIndex = 0;
 
-  // Пример транзакций
-  final List<_TransactionData> transactions = [
-    _TransactionData(
-      category: 'Продукты',
-      title: 'Продукты',
-      subtitle: '12 мая 2025, 14:30',
-      amount: -650,
-      color: Colors.redAccent,
-      comment: 'Покупка в супермаркете',
-    ),
-    _TransactionData(
-      category: 'Зарплата',
-      title: 'Зарплата',
-      subtitle: '10 мая 2025, 09:00',
-      amount: 15000,
-      color: Colors.green,
-      comment: 'Майская зарплата',
-    ),
-  ];
+  // Удален список примеров транзакций
+  final List<_TransactionData> transactions = [];
 
   @override
   void initState() {
     super.initState();
     _loadTransactions();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _loadTransactions(); // Обновляем список транзакций при возвращении на экран
   }
 
   Future<void> _loadTransactions() async {
@@ -52,9 +42,13 @@ class _HomeScreenState extends State<HomeScreen> {
       transactions.addAll(
         data.map(
           (t) => _TransactionData(
+            id: t['id'].toString(),
             category: t['category'],
-            title: t['title'] ?? 'Без названия',
-            subtitle: t['date'],
+            title: t['title'],
+            subtitle:
+                t['date'] != null
+                    ? _formatDateTime(DateTime.parse(t['date']))
+                    : 'Дата не указана', // Используем значение по умолчанию
             amount: t['amount'],
             color: t['amount'] > 0 ? Colors.green : Colors.redAccent,
             comment: t['comment'] ?? '',
@@ -62,6 +56,30 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     });
+  }
+
+  String _formatDateTime(DateTime dateTime) {
+    const months = [
+      '',
+      'января',
+      'февраля',
+      'марта',
+      'апреля',
+      'мая',
+      'июня',
+      'июля',
+      'августа',
+      'сентября',
+      'октября',
+      'ноября',
+      'декабря',
+    ];
+    final day = dateTime.day;
+    final month = months[dateTime.month];
+    final year = dateTime.year;
+    final hour = dateTime.hour.toString().padLeft(2, '0');
+    final minute = dateTime.minute.toString().padLeft(2, '0');
+    return '$day $month $year, $hour:$minute';
   }
 
   // Получить иконку по категории
@@ -80,13 +98,14 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _openTransactionDetailsScreen(
+  Future<void> _openTransactionDetailsScreen(
     BuildContext context,
     TransactionCard card,
-  ) {
-    Navigator.of(context).push(
+  ) async {
+    final result = await Navigator.of(context).push(
       _fadeRoute(
         TransactionDetailsScreen(
+          id: card.id, // Передаем id транзакции
           icon: _getCategoryIcon(card.category),
           title: card.title,
           subtitle: card.subtitle,
@@ -97,6 +116,9 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+    if (result == true) {
+      _loadTransactions(); // Обновляем список транзакций
+    }
   }
 
   void _openEditAccountScreen(
@@ -128,6 +150,15 @@ class _HomeScreenState extends State<HomeScreen> {
         accounts.add(result);
         selectedAccountIndex = accounts.length - 1;
       });
+    }
+  }
+
+  Future<void> _openAddTransactionScreen(BuildContext context) async {
+    final result = await Navigator.of(
+      context,
+    ).push(_fadeRoute(const AddTransactionScreen()));
+    if (result == true) {
+      _loadTransactions(); // Обновляем список транзакций
     }
   }
 
@@ -295,13 +326,17 @@ class _HomeScreenState extends State<HomeScreen> {
                   children:
                       transactions
                           .map(
-                            (t) => TransactionCard(
-                              category: t.category,
-                              title: t.title,
-                              subtitle: t.subtitle,
-                              amount: '${t.amount > 0 ? '+' : ''}${t.amount} ₽',
-                              color: t.color,
-                              comment: t.comment,
+                            (transaction) => TransactionCard(
+                              id:
+                                  transaction
+                                      .id, // Передаем реальный id из базы данных
+                              category: transaction.category,
+                              title: transaction.title,
+                              subtitle: transaction.subtitle,
+                              amount:
+                                  '${transaction.amount > 0 ? '+' : ''}${transaction.amount} ₽',
+                              color: transaction.color,
+                              comment: transaction.comment,
                               onTap:
                                   (context, card) =>
                                       _openTransactionDetailsScreen(
@@ -378,6 +413,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
 // --- Пример модели транзакции ---
 class _TransactionData {
+  final String id; // Добавлено поле id
   final String category;
   final String title;
   final String subtitle;
@@ -385,6 +421,7 @@ class _TransactionData {
   final Color color;
   final String comment;
   _TransactionData({
+    required this.id, // Добавлено поле id
     required this.category,
     required this.title,
     required this.subtitle,
@@ -394,8 +431,9 @@ class _TransactionData {
   });
 }
 
-// Обновлённый TransactionCard
+// --- Карточка транзакции ---
 class TransactionCard extends StatelessWidget {
+  final String id;
   final String category;
   final String title;
   final String subtitle;
@@ -407,6 +445,7 @@ class TransactionCard extends StatelessWidget {
 
   const TransactionCard({
     super.key,
+    required this.id,
     required this.category,
     required this.title,
     required this.subtitle,

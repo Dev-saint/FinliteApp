@@ -8,8 +8,12 @@ import 'screens/settings_screen.dart';
 import 'screens/add_transaction_screen.dart';
 import 'theme/theme_provider.dart';
 import 'theme/app_themes.dart';
+import 'package:intl/date_symbol_data_local.dart';
+import '../services/database_service.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await initializeDateFormatting('ru', null); // Инициализация локали
   runApp(
     ChangeNotifierProvider(
       create: (_) => ThemeProvider(),
@@ -64,7 +68,7 @@ class _MainNavigationState extends State<MainNavigation> {
       PageRouteBuilder(
         pageBuilder:
             (context, animation, secondaryAnimation) =>
-                const AddTransactionScreen(),
+                const AddTransactionScreen(), // Убедились, что AddTransactionScreen доступен
         transitionsBuilder:
             (context, animation, secondaryAnimation, child) =>
                 FadeTransition(opacity: animation, child: child),
@@ -77,6 +81,13 @@ class _MainNavigationState extends State<MainNavigation> {
         _selectedIndex = 0;
       });
     }
+  }
+
+  Future<void> _clearDatabase() async {
+    await DatabaseService.clearTransactions();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('База данных очищена от транзакций')),
+    );
   }
 
   PageTransitionSwitcherTransitionBuilder _getTransitionBuilder(int index) {
@@ -140,6 +151,10 @@ class _MainNavigationState extends State<MainNavigation> {
             label: 'Настройки',
           ),
         ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _clearDatabase, // Вызов очистки базы данных
+        child: const Icon(Icons.delete),
       ),
     );
   }

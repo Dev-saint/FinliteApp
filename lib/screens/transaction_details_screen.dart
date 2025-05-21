@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import '../services/database_service.dart';
 
 class TransactionDetailsScreen extends StatefulWidget {
+  final String id;
   final IconData icon;
   final String title;
   final String subtitle;
@@ -11,6 +13,7 @@ class TransactionDetailsScreen extends StatefulWidget {
 
   const TransactionDetailsScreen({
     super.key,
+    required this.id,
     required this.icon,
     required this.title,
     required this.subtitle,
@@ -35,6 +38,7 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
   late String _category;
   late Color _color;
   DateTime? _selectedDateTime;
+  late String _type = 'расход'; // Установлено значение по умолчанию
 
   @override
   void initState() {
@@ -52,47 +56,55 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
     _commentController = TextEditingController(text: widget.comment);
     _category = widget.category;
     _color = widget.color;
-    // Попытка парсить дату из subtitle
+    _type = _getCategoryType(_category); // Автоматическое подтягивание типа
     _selectedDateTime = _tryParseDateTime(widget.subtitle);
   }
 
   DateTime? _tryParseDateTime(String text) {
+    // Удаляем лишние пробелы
+    text = text.trim();
+
     // Ожидается формат "12 мая 2025, 14:30"
     try {
       final parts = text.split(',');
       if (parts.length == 2) {
-        final datePart = parts[0].trim();
-        final timePart = parts[1].trim();
-        final months = {
-          'января': 1,
-          'февраля': 2,
-          'марта': 3,
-          'апреля': 4,
-          'мая': 5,
-          'июня': 6,
-          'июля': 7,
-          'августа': 8,
-          'сентября': 9,
-          'октября': 10,
-          'ноября': 11,
-          'декабря': 12,
-        };
-        final dateMatch = RegExp(
-          r'(\d{1,2}) (\w+) (\d{4})',
-        ).firstMatch(datePart);
-        if (dateMatch != null) {
-          final day = int.parse(dateMatch.group(1)!);
-          final month = months[dateMatch.group(2)!] ?? 1;
-          final year = int.parse(dateMatch.group(3)!);
-          final timeMatch = RegExp(r'(\d{1,2}):(\d{2})').firstMatch(timePart);
-          if (timeMatch != null) {
-            final hour = int.parse(timeMatch.group(1)!);
-            final minute = int.parse(timeMatch.group(2)!);
+        final datePart = parts[0].trim().split(' ');
+        final timePart = parts[1].trim().split(':');
+
+        if (datePart.length == 3 && timePart.length == 2) {
+          const months = [
+            'января',
+            'февраля',
+            'марта',
+            'апреля',
+            'мая',
+            'июня',
+            'июля',
+            'августа',
+            'сентября',
+            'октября',
+            'ноября',
+            'декабря',
+          ];
+
+          final day = int.tryParse(datePart[0]);
+          final month = months.indexOf(datePart[1]) + 1;
+          final year = int.tryParse(datePart[2]);
+          final hour = int.tryParse(timePart[0]);
+          final minute = int.tryParse(timePart[1]);
+
+          if (day != null &&
+              month > 0 &&
+              year != null &&
+              hour != null &&
+              minute != null) {
             return DateTime(year, month, day, hour, minute);
           }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      print('Ошибка парсинга даты: $e');
+    }
     return null;
   }
 
@@ -159,6 +171,25 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
     }
   }
 
+  String _getCategoryType(String category) {
+    switch (category) {
+      case 'Продукты':
+      case 'Транспорт':
+      case 'Развлечения':
+        return 'расход';
+      case 'Зарплата':
+        return 'доход';
+      default:
+        return 'расход';
+    }
+  }
+
+  void _updateTypeFromCategory(String category) {
+    setState(() {
+      _type = _getCategoryType(category);
+    });
+  }
+
   void _startEdit() {
     setState(() {
       _isEditing = true;
@@ -197,17 +228,65 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
     }
   }
 
-  void _saveEdit() {
+  void _saveEdit() async {
     if (!mounted) return;
     if (_formKey.currentState?.validate() ?? false) {
-      setState(() {
-        _isEditing = false;
-        _category = _category;
-        _color = _getCategoryColor(_category);
-      });
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Изменения сохранены')));
+      // Если дата не была изменена через интерфейс, пытаемся распарсить текст из поля
+      final dateToSave =
+          _selectedDateTime ??
+          _tryParseDateTime(_subtitleController.text) ??
+          _tryParseDateTime(widget.subtitle);
+
+      final updatedTransaction = {
+        'id': widget.id, // Используем id транзакции
+        'title': _titleController.text,
+        'amount':
+            int.parse(_amountController.text) * (_type == 'расход' ? -1 : 1),
+        'type': _type,
+        'category': _category,
+        'date': dateToSave?.toIso8601String(), // Преобразуем дату в ISO 8601
+        'comment': _commentController.text,
+      };
+
+      await DatabaseService.updateTransaction(updatedTransaction);
+
+      if (!mounted) return;
+      Navigator.pop(context, true); // Возвращаем true для обновления списка
+    }
+  }
+
+  void _deleteTransaction() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Удалить транзакцию'),
+            content: const Text(
+              'Вы уверены, что хотите удалить эту транзакцию?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Отмена'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Удалить'),
+              ),
+            ],
+          ),
+    );
+
+    if (confirm == true) {
+      final rowsDeleted = await DatabaseService.deleteTransaction(widget.id);
+      if (rowsDeleted > 0) {
+        if (!mounted) return;
+        Navigator.pop(context, true); // Возвращаем true для обновления списка
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Ошибка при удалении транзакции')),
+        );
+      }
     }
   }
 
@@ -237,6 +316,14 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
             }
           },
         ),
+        actions: [
+          if (!_isEditing)
+            IconButton(
+              icon: const Icon(Icons.delete),
+              tooltip: 'Удалить',
+              onPressed: _deleteTransaction,
+            ),
+        ],
       ),
       body: Material(
         color: colorScheme.surface,
@@ -249,6 +336,30 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
               children: [
                 iconWidget,
                 const SizedBox(height: 24),
+                _isEditing
+                    ? DropdownButtonFormField<String>(
+                      value: _type,
+                      decoration: const InputDecoration(labelText: 'Тип'),
+                      items: const [
+                        DropdownMenuItem(value: 'доход', child: Text('Доход')),
+                        DropdownMenuItem(
+                          value: 'расход',
+                          child: Text('Расход'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() {
+                            _type = value;
+                          });
+                        }
+                      },
+                    )
+                    : Text(
+                      'Тип: $_type',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                const SizedBox(height: 8),
                 _isEditing
                     ? TextFormField(
                       controller: _titleController,
@@ -320,6 +431,7 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
                           setState(() {
                             _category = value;
                             _color = _getCategoryColor(_category);
+                            _updateTypeFromCategory(_category); // Обновляем тип
                           });
                         }
                       },

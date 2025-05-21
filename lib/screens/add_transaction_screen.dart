@@ -13,6 +13,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   final amountController = TextEditingController();
   final commentController = TextEditingController();
   final timeController = TextEditingController();
+  final titleController = TextEditingController(); // Добавлено
   String? selectedType;
   String? selectedCategory;
   DateTime? selectedDateTime;
@@ -26,6 +27,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
   @override
   void dispose() {
+    titleController.dispose(); // Добавлено
     amountController.dispose();
     commentController.dispose();
     timeController.dispose();
@@ -89,14 +91,24 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   Future<void> _saveTransaction() async {
     if (formKey.currentState?.validate() ?? false) {
       final transaction = {
-        'amount': int.parse(amountController.text),
+        'title': titleController.text,
+        'amount':
+            int.parse(amountController.text) *
+            (selectedType == 'расход' ? -1 : 1), // Учитываем тип
         'type': selectedType,
         'category': selectedCategory,
         'date': selectedDateTime?.toIso8601String(),
         'comment': commentController.text,
       };
-      await DatabaseService.insertTransaction(transaction);
-      Navigator.pop(context, true); // Возвращаем true при сохранении
+      final id = await DatabaseService.insertTransaction(transaction);
+      if (id > 0) {
+        if (!mounted) return;
+        Navigator.pop(context, true); // Возвращаем true для обновления списка
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Ошибка при сохранении транзакции')),
+        );
+      }
     }
   }
 
@@ -112,8 +124,15 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             key: formKey,
             child: Column(
               children: [
+                TextFormField(
+                  controller: titleController,
+                  decoration: const InputDecoration(
+                    labelText: 'Название транзакции',
+                  ),
+                ),
+                const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  decoration: const InputDecoration(labelText: 'Тип'),
+                  decoration: const InputDecoration(labelText: 'Тип *'),
                   items: const [
                     DropdownMenuItem(value: 'доход', child: Text('Доход')),
                     DropdownMenuItem(value: 'расход', child: Text('Расход')),
@@ -129,7 +148,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: amountController,
-                  decoration: const InputDecoration(labelText: 'Сумма'),
+                  decoration: const InputDecoration(labelText: 'Сумма *'),
                   keyboardType: TextInputType.number,
                   validator:
                       (value) =>
@@ -139,7 +158,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  decoration: const InputDecoration(labelText: 'Категория'),
+                  decoration: const InputDecoration(labelText: 'Категория *'),
                   items:
                       categories
                           .map(
@@ -163,7 +182,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                     child: TextFormField(
                       controller: timeController,
                       decoration: const InputDecoration(
-                        labelText: 'Дата и время',
+                        labelText: 'Дата и время *',
                         suffixIcon: Icon(Icons.calendar_today),
                       ),
                       validator:
