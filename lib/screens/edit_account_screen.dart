@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import '../models/account.dart';
+import '../services/database_service.dart';
 
 class EditAccountScreen extends StatefulWidget {
   final String? initialName;
-  final int? initialBalance;
 
-  const EditAccountScreen({super.key, this.initialName, this.initialBalance});
+  const EditAccountScreen({super.key, this.initialName});
 
   @override
   State<EditAccountScreen> createState() => _EditAccountScreenState();
@@ -25,6 +25,40 @@ class _EditAccountScreenState extends State<EditAccountScreen> {
   void dispose() {
     nameController.dispose();
     super.dispose();
+  }
+
+  Future<void> _saveAccount() async {
+    if (_formKey.currentState?.validate() ?? false) {
+      final name = nameController.text.trim();
+
+      final account = Account(
+        id:
+            widget.initialName != null
+                ? await _getAccountIdByName(widget.initialName!)
+                : null,
+        name: name,
+      );
+
+      if (account.id == null) {
+        await DatabaseService.insertAccount(account.toMap());
+      } else {
+        await DatabaseService.updateAccount(account.toMap());
+      }
+
+      if (!mounted) return;
+      Navigator.pop(context, account);
+    }
+  }
+
+  Future<int?> _getAccountIdByName(String name) async {
+    final accounts = await DatabaseService.getAllAccounts();
+    final account = accounts.firstWhere(
+      (a) => a['name'] == name,
+      orElse: () => {}, // Возвращаем пустую карту вместо null
+    );
+    return account.isNotEmpty
+        ? account['id'] as int?
+        : null; // Убираем ? перед ['id']
   }
 
   @override
@@ -52,16 +86,7 @@ class _EditAccountScreenState extends State<EditAccountScreen> {
               ),
               const SizedBox(height: 32),
               ElevatedButton(
-                onPressed: () {
-                  if (_formKey.currentState?.validate() ?? false) {
-                    final name = nameController.text.trim();
-                    final balance = widget.initialBalance ?? 0;
-                    Navigator.pop(
-                      context,
-                      Account(name: name, balance: balance),
-                    );
-                  }
-                },
+                onPressed: _saveAccount,
                 child: const Text('Сохранить'),
               ),
             ],

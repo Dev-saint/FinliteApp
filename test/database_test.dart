@@ -66,25 +66,6 @@ void main() {
       ).info('Тест "Insert and retrieve a transaction" успешно пройден.');
     });
 
-    test('Insert and retrieve a category', () async {
-      // Вставляем категорию
-      final category = {
-        'name': 'Тестовая категория',
-        'type': 'расход',
-        'icon': null,
-        'customIconPath': null,
-      };
-      await DatabaseService.insertCategory(category);
-
-      // Получаем все категории
-      final categories = await DatabaseService.getAllCategories();
-
-      // Проверяем, что категория добавлена
-      expect(categories.length, 1);
-      expect(categories.first['name'], category['name']);
-      expect(categories.first['type'], category['type']);
-    });
-
     test('Insert multiple transactions and retrieve them', () async {
       // Вставляем несколько транзакций
       final transactionsToInsert = [

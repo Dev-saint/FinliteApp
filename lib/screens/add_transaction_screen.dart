@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../services/database_service.dart';
+import '../main.dart'; // Добавлен импорт для доступа к глобальному методу
+import '../models/account.dart'; // Добавьте этот импорт, если Account определён в models/account.dart
 
 class AddTransactionScreen extends StatefulWidget {
   const AddTransactionScreen({super.key});
@@ -17,6 +20,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   String? selectedType;
   String? selectedCategory;
   DateTime? selectedDateTime;
+  int? selectedAccountId;
   final List<String> categories = [
     'Продукты',
     'Транспорт',
@@ -24,6 +28,13 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     'Зарплата',
     'Другое',
   ];
+  final List<Account> accounts = []; // Удалено поле balance из Account
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAccounts(); // Загружаем список счетов при инициализации
+  }
 
   @override
   void dispose() {
@@ -34,19 +45,36 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     super.dispose();
   }
 
+  Future<void> _loadAccounts() async {
+    final data = await DatabaseService.getAllAccounts();
+    setState(() {
+      accounts.clear();
+      accounts.addAll(data.map((a) => Account(id: a['id'], name: a['name'])));
+    });
+  }
+
   Future<void> _pickDateTime(BuildContext context) async {
     final now = DateTime.now();
+    if (!mounted) return;
     final date = await showDatePicker(
       context: context,
       initialDate: selectedDateTime ?? now,
       firstDate: DateTime(2000),
       lastDate: DateTime(2100),
+      locale: const Locale('ru', 'RU'), // Устанавливаем русский язык
     );
     if (!mounted) return;
     if (date != null) {
       final time = await showTimePicker(
         context: context,
         initialTime: TimeOfDay.fromDateTime(selectedDateTime ?? now),
+        builder: (ctx, child) {
+          return Localizations.override(
+            context: ctx,
+            locale: const Locale('ru', 'RU'), // Устанавливаем русский язык
+            child: child,
+          );
+        },
       );
       if (!mounted) return;
       if (time != null) {
@@ -65,27 +93,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   }
 
   String _formatDateTime(DateTime dateTime) {
-    const months = [
-      '',
-      'января',
-      'февраля',
-      'марта',
-      'апреля',
-      'мая',
-      'июня',
-      'июля',
-      'августа',
-      'сентября',
-      'октября',
-      'ноября',
-      'декабря',
-    ];
-    final day = dateTime.day;
-    final month = months[dateTime.month];
-    final year = dateTime.year;
-    final hour = dateTime.hour.toString().padLeft(2, '0');
-    final minute = dateTime.minute.toString().padLeft(2, '0');
-    return '$day $month $year, $hour:$minute';
+    return DateFormat('dd MMMM yyyy, HH:mm', 'ru').format(dateTime);
   }
 
   Future<void> _saveTransaction() async {
@@ -99,15 +107,22 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         'category': selectedCategory,
         'date': selectedDateTime?.toIso8601String(),
         'comment': commentController.text,
+        'account_id': selectedAccountId, // Привязка к счету
       };
-      final id = await DatabaseService.insertTransaction(transaction);
-      if (id > 0) {
-        if (!mounted) return;
-        Navigator.pop(context, true); // Возвращаем true для обновления списка
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Ошибка при сохранении транзакции')),
-        );
+
+      try {
+        final id = await DatabaseService.insertTransaction(transaction);
+        if (id > 0) {
+          updateHomeScreenTransactions(); // Вызываем глобальный метод обновления
+          if (!mounted) return;
+          Navigator.pop(context, true); // Возвращаемся на главный экран
+        } else {
+          throw Exception('Ошибка при сохранении транзакции');
+        }
+      } catch (e) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.toString())));
       }
     }
   }
@@ -199,6 +214,44 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   decoration: const InputDecoration(labelText: 'Комментарий'),
                   maxLines: 2,
                 ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<int?>(
+                  decoration: const InputDecoration(labelText: 'Счёт *'),
+                  items:
+                      accounts
+                          .map(
+                            (account) => DropdownMenuItem(
+                              value:
+                                  account
+                                      .id, // Убедитесь, что передается правильный id счета
+                              child: Text(account.name),
+                            ),
+                          )
+                          .toList(),
+                  value: selectedAccountId,
+                  onChanged: (value) {
+                    setState(() {
+                      selectedAccountId = value; // Сохраняем выбранный id счета
+                    });
+                  },
+                  validator: (value) {
+                    if (accounts.isEmpty) {
+                      return 'Сначала создайте хотя бы один счёт.';
+                    }
+                    return value == null ? 'Выберите счёт' : null;
+                  },
+                ),
+                if (accounts.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      'Сначала создайте хотя бы один счёт.',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
                 const SizedBox(height: 24),
                 ElevatedButton(
                   onPressed: _saveTransaction,

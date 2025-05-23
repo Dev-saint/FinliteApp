@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'add_category_screen.dart';
 import 'edit_category_screen.dart';
-import '../services/database_service.dart';
 
 class CategoriesScreen extends StatefulWidget {
   const CategoriesScreen({super.key});
@@ -12,30 +11,6 @@ class CategoriesScreen extends StatefulWidget {
 
 class CategoriesScreenState extends State<CategoriesScreen> {
   final List<CategoryTile> categories = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _loadCategories();
-  }
-
-  Future<void> _loadCategories() async {
-    final data = await DatabaseService.getAllCategories();
-    setState(() {
-      categories.clear();
-      categories.addAll(
-        data.map(
-          (c) => CategoryTile(
-            name: c['name'],
-            isDefault: false,
-            icon: Icons.label, // Заменить на логику выбора иконки
-            type: c['type'],
-            customIconPath: c['customIconPath'],
-          ),
-        ),
-      );
-    });
-  }
 
   IconData _getCategoryIcon(String name) {
     switch (name) {

@@ -3,12 +3,19 @@ import 'package:provider/provider.dart';
 import '../theme/theme_provider.dart';
 import '../services/database_service.dart';
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
   @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  @override
   Widget build(BuildContext context) {
-    final themeProvider = Provider.of<ThemeProvider>(context);
+    final themeProvider = Provider.of<ThemeProvider>(
+      context,
+    ); // Убедились, что ThemeProvider доступен
 
     return Scaffold(
       appBar: AppBar(title: const Text('Настройки')),
@@ -59,10 +66,22 @@ class SettingsScreen extends StatelessWidget {
               title: const Text('Вывести транзакции в консоль'),
               onTap: () async {
                 await DatabaseService.printAllTransactions();
+                if (!mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text('Транзакции выведены в консоль'),
                   ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.account_balance),
+              title: const Text('Вывести счета в консоль'),
+              onTap: () async {
+                await DatabaseService.printAllAccounts();
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Счета выведены в консоль')),
                 );
               },
             ),

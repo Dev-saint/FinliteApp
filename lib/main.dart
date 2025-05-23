@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart'; // Убедились, что импорт корректен
 import 'package:provider/provider.dart';
 import 'package:animations/animations.dart';
 import 'screens/home_screen.dart';
@@ -10,14 +11,33 @@ import 'theme/theme_provider.dart';
 import 'theme/app_themes.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import '../services/database_service.dart';
+import 'package:logging/logging.dart';
 
 void main() async {
+  // Настройка логгера
+  Logger.root.level = Level.ALL; // Уровень логов, которые ты хочешь видеть
+  Logger.root.onRecord.listen((record) {
+    // Вывод логов в консоль
+    print(
+      '${record.level.name}: ${record.time}: ${record.loggerName}: ${record.message}',
+    );
+  });
+
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('ru', null); // Инициализация локали
+
   runApp(
-    ChangeNotifierProvider(
-      create: (_) => ThemeProvider(),
-      child: const FinliteApp(),
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(
+          create:
+              (_) => ThemeProvider(), // Убедились, что ThemeProvider передается
+        ),
+      ],
+      child: Builder(
+        // Оборачиваем FinliteApp в Builder
+        builder: (context) => const FinliteApp(),
+      ),
     ),
   );
 }
@@ -34,9 +54,25 @@ class FinliteApp extends StatelessWidget {
       theme: lightTheme,
       darkTheme: darkTheme,
       themeMode: themeProvider.currentTheme,
+      localizationsDelegates: [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ], // Убрано const, так как список содержит не константы
+      supportedLocales: const [
+        Locale('ru', 'RU'), // Русская локализация
+        Locale('en', 'US'), // Английская локализация
+      ],
       home: const MainNavigation(),
     );
   }
+}
+
+// Добавлено: глобальная функция для обновления транзакций
+final GlobalKey<HomeScreenState> homeScreenKey = GlobalKey<HomeScreenState>();
+
+void updateHomeScreenTransactions() {
+  homeScreenKey.currentState?.updateTransactions();
 }
 
 class MainNavigation extends StatefulWidget {
@@ -49,11 +85,11 @@ class MainNavigation extends StatefulWidget {
 class _MainNavigationState extends State<MainNavigation> {
   int _selectedIndex = 0;
 
-  static final List<Widget> _screens = [
-    HomeScreen(),
-    CategoriesScreen(),
-    ReportsScreen(),
-    SettingsScreen(),
+  final List<Widget> _screens = [
+    HomeScreen(key: homeScreenKey), // Главная
+    const CategoriesScreen(), // Категории
+    const ReportsScreen(), // Отчёты
+    const SettingsScreen(), // Настройки
   ];
 
   void _onItemTapped(int index) {
@@ -77,14 +113,16 @@ class _MainNavigationState extends State<MainNavigation> {
     );
     // После сохранения возвращаемся на главный экран
     if (result == true) {
+      updateHomeScreenTransactions(); // Вызываем глобальный метод обновления
       setState(() {
-        _selectedIndex = 0;
+        _selectedIndex = 0; // Возвращаемся на главный экран
       });
     }
   }
 
   Future<void> _clearDatabase() async {
     await DatabaseService.clearTransactions();
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('База данных очищена от транзакций')),
     );
@@ -99,22 +137,21 @@ class _MainNavigationState extends State<MainNavigation> {
   Widget build(BuildContext context) {
     final navColor = Theme.of(context).colorScheme.primary;
     final navFg = Theme.of(context).colorScheme.onPrimary;
+
     return Scaffold(
-      body: PageTransitionSwitcher(
-        duration: const Duration(milliseconds: 300),
-        reverse: false,
-        transitionBuilder: _getTransitionBuilder(_selectedIndex),
-        child: _screens[_selectedIndex],
+      body: IndexedStack(
+        index: _selectedIndex,
+        children:
+            _screens, // Используем IndexedStack для сохранения состояния экранов
       ),
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _selectedIndex > 1 ? _selectedIndex + 1 : _selectedIndex,
+        selectedIndex: _selectedIndex,
         onDestinationSelected: (index) {
-          // Если нажали на центральную кнопку (+), открываем AddTransactionScreen
           if (index == 2) {
+            // Центральная кнопка "+" открывает AddTransactionScreen
             _openAddTransactionScreen(context);
           } else {
-            // Корректируем индекс, чтобы пропустить центральную кнопку
-            _onItemTapped(index > 2 ? index - 1 : index);
+            _onItemTapped(index < 2 ? index : index - 1); // Корректируем индекс
           }
         },
         destinations: [
@@ -123,7 +160,6 @@ class _MainNavigationState extends State<MainNavigation> {
             icon: Icon(Icons.category),
             label: 'Категории',
           ),
-          // Центральная кнопка "+" (без label)
           NavigationDestination(
             icon: Container(
               decoration: BoxDecoration(
@@ -151,10 +187,6 @@ class _MainNavigationState extends State<MainNavigation> {
             label: 'Настройки',
           ),
         ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _clearDatabase, // Вызов очистки базы данных
-        child: const Icon(Icons.delete),
       ),
     );
   }

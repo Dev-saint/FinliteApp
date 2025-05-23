@@ -1,5 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:logging/logging.dart';
+import 'package:intl/intl.dart';
 import '../services/database_service.dart';
+
+// Temporary Account class definition (replace with your actual Account model or import)
+class Account {
+  final int? id;
+  final String name;
+
+  Account({required this.id, required this.name});
+}
 
 class TransactionDetailsScreen extends StatefulWidget {
   final String id;
@@ -39,6 +49,9 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
   late Color _color;
   DateTime? _selectedDateTime;
   late String _type = 'расход'; // Установлено значение по умолчанию
+  int? selectedAccountId;
+
+  final List<Account> accounts = []; // Добавлено: список счетов
 
   @override
   void initState() {
@@ -58,6 +71,30 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
     _color = widget.color;
     _type = _getCategoryType(_category); // Автоматическое подтягивание типа
     _selectedDateTime = _tryParseDateTime(widget.subtitle);
+
+    // Загружаем список счетов и устанавливаем выбранный счет
+    _loadAccounts();
+  }
+
+  Future<void> _loadAccounts() async {
+    final data = await DatabaseService.getAllAccounts();
+    setState(() {
+      accounts.clear();
+      accounts.addAll(data.map((a) => Account(id: a['id'], name: a['name'])));
+    });
+
+    // Получаем счет по account_id из записи транзакции
+    if (widget.id.isNotEmpty) {
+      final transaction = await DatabaseService.getTransactionById(widget.id);
+      if (transaction != null && transaction['account_id'] != null) {
+        final account = await DatabaseService.getAccountById(
+          transaction['account_id'],
+        );
+        setState(() {
+          selectedAccountId = account?['id'];
+        });
+      }
+    }
   }
 
   DateTime? _tryParseDateTime(String text) {
@@ -103,33 +140,13 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
         }
       }
     } catch (e) {
-      print('Ошибка парсинга даты: $e');
+      Logger('TransactionDetailsScreen').warning('Ошибка парсинга даты: $e');
     }
     return null;
   }
 
   String _formatDateTime(DateTime dateTime) {
-    const months = [
-      '',
-      'января',
-      'февраля',
-      'марта',
-      'апреля',
-      'мая',
-      'июня',
-      'июля',
-      'августа',
-      'сентября',
-      'октября',
-      'ноября',
-      'декабря',
-    ];
-    final day = dateTime.day;
-    final month = months[dateTime.month];
-    final year = dateTime.year;
-    final hour = dateTime.hour.toString().padLeft(2, '0');
-    final minute = dateTime.minute.toString().padLeft(2, '0');
-    return '$day $month $year, $hour:$minute';
+    return DateFormat('dd MMMM yyyy, HH:mm', 'ru').format(dateTime);
   }
 
   @override
@@ -204,13 +221,20 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
       initialDate: initialDate,
       firstDate: DateTime(2000),
       lastDate: DateTime(2100),
+      locale: const Locale('ru', 'RU'), // Устанавливаем русский язык
     );
     if (!mounted) return;
     if (date != null) {
-      // Only use context after mounted check
       final time = await showTimePicker(
         context: context,
         initialTime: TimeOfDay.fromDateTime(_selectedDateTime ?? now),
+        builder: (context, child) {
+          return Localizations.override(
+            context: context,
+            locale: const Locale('ru', 'RU'), // Устанавливаем русский язык
+            child: child,
+          );
+        },
       );
       if (!mounted) return;
       if (time != null) {
@@ -231,21 +255,22 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
   void _saveEdit() async {
     if (!mounted) return;
     if (_formKey.currentState?.validate() ?? false) {
-      // Если дата не была изменена через интерфейс, пытаемся распарсить текст из поля
       final dateToSave =
           _selectedDateTime ??
           _tryParseDateTime(_subtitleController.text) ??
           _tryParseDateTime(widget.subtitle);
 
       final updatedTransaction = {
-        'id': widget.id, // Используем id транзакции
+        'id': widget.id,
         'title': _titleController.text,
         'amount':
             int.parse(_amountController.text) * (_type == 'расход' ? -1 : 1),
         'type': _type,
         'category': _category,
-        'date': dateToSave?.toIso8601String(), // Преобразуем дату в ISO 8601
+        'date': dateToSave?.toIso8601String(),
         'comment': _commentController.text,
+        'account_id':
+            selectedAccountId, // Проверяем, что selectedAccountId не null
       };
 
       await DatabaseService.updateTransaction(updatedTransaction);
@@ -445,6 +470,31 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
                       'Категория: $_category',
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
+                const SizedBox(height: 8),
+                if (_isEditing)
+                  DropdownButtonFormField<int?>(
+                    decoration: const InputDecoration(labelText: 'Счёт'),
+                    items:
+                        accounts
+                            .map(
+                              (account) => DropdownMenuItem(
+                                value: account.id,
+                                child: Text(account.name),
+                              ),
+                            )
+                            .toList(),
+                    value: selectedAccountId,
+                    onChanged: (value) {
+                      setState(() {
+                        selectedAccountId = value;
+                      });
+                    },
+                  )
+                else
+                  Text(
+                    'Счёт: ${accounts.firstWhere((a) => a.id == selectedAccountId, orElse: () => Account(id: null, name: 'Неизвестно')).name}',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
                 const SizedBox(height: 24),
                 _isEditing
                     ? TextFormField(

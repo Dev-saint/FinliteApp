@@ -10,13 +10,13 @@ class ReportsScreen extends StatelessWidget {
     _Transaction(
       title: 'Продукты',
       category: 'Продукты',
-      date: '12 мая 2025, 14:30',
+      date: '2025-05-12 14:30:00',
       amount: -650,
     ),
     _Transaction(
       title: 'Зарплата',
       category: 'Зарплата',
-      date: '10 мая 2025, 09:00',
+      date: '2025-05-10 09:00:00',
       amount: 15000,
     ),
   ];

@@ -3,6 +3,7 @@ class TransactionModel {
   final int amount;
   final String type; // 'доход' или 'расход'
   final int categoryId;
+  final int accountId; // Поле для привязки к счету
   final DateTime date;
   final String description;
 
@@ -11,6 +12,7 @@ class TransactionModel {
     required this.amount,
     required this.type,
     required this.categoryId,
+    required this.accountId, // Поле для привязки к счету
     required this.date,
     required this.description,
   });
@@ -21,6 +23,7 @@ class TransactionModel {
       'amount': amount,
       'type': type,
       'category_id': categoryId,
+      'account_id': accountId, // Привязка к счету
       'date': date.toIso8601String(),
       'description': description,
     };
@@ -32,6 +35,7 @@ class TransactionModel {
       amount: map['amount'] as int,
       type: map['type'] as String,
       categoryId: map['category_id'] as int,
+      accountId: map['account_id'] as int, // Привязка к счету
       date: DateTime.parse(map['date'] as String),
       description: map['description'] as String? ?? '',
     );
