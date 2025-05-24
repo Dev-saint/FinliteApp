@@ -3,6 +3,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 // Для форматирования даты
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:logging/logging.dart';
+import 'package:flutter/material.dart';
 
 class DatabaseService {
   static Database? _db;
@@ -25,7 +26,7 @@ class DatabaseService {
     final path = join(dbPath, 'finlite.db');
     return await openDatabase(
       path,
-      version: 4, // Увеличиваем версию базы данных
+      version: 5, // Увеличиваем версию базы данных
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE accounts (
@@ -52,11 +53,24 @@ class DatabaseService {
             name TEXT,
             type TEXT,
             icon INTEGER,
-            customIconPath TEXT
+            customIconPath TEXT,
+            isDefault INTEGER DEFAULT 0
           )
         ''');
       },
       onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 5) {
+          // Добавляем столбец isDefault, если его нет
+          final tableInfo = await db.rawQuery('PRAGMA table_info(categories)');
+          final columnExists = tableInfo.any(
+            (column) => column['name'] == 'isDefault',
+          );
+          if (!columnExists) {
+            await db.execute(
+              'ALTER TABLE categories ADD COLUMN isDefault INTEGER DEFAULT 0',
+            );
+          }
+        }
         if (oldVersion < 4) {
           // Проверяем, существует ли столбец account_id
           final tableInfo = await db.rawQuery(
@@ -214,5 +228,128 @@ class DatabaseService {
       whereArgs: [accountId],
       orderBy: 'date ASC',
     );
+  }
+
+  // --- Categories ---
+  static Future<void> addCategory(Map<String, dynamic> category) async {
+    final db = await database;
+    final exists = await categoryExists(category['name']);
+    if (exists) {
+      throw Exception('Категория с таким названием уже существует');
+    }
+    await db.insert('categories', category);
+  }
+
+  static Future<void> updateCategory(Map<String, dynamic> category) async {
+    final db = await database;
+    await db.update(
+      'categories',
+      {
+        'name': category['name'],
+        'icon': category['icon'], // Сохраняем codePoint
+        'type': category['type'],
+        'customIconPath': category['customIconPath'],
+      },
+      where: 'id = ?',
+      whereArgs: [category['id']],
+    );
+  }
+
+  static Future<List<Map<String, dynamic>>> getAllCategories() async {
+    final db = await database;
+    return await db.query('categories', orderBy: 'name ASC');
+  }
+
+  static Future<int> deleteCategory(int id) async {
+    final db = await database;
+    return await db.delete('categories', where: 'id = ?', whereArgs: [id]);
+  }
+
+  static Future<void> printAllCategories() async {
+    final db = await database;
+    final categories = await db.query('categories');
+    final logger = Logger('DatabaseService');
+    for (final category in categories) {
+      logger.info('Category: $category');
+    }
+  }
+
+  static Future<Map<String, dynamic>?> getCategoryById(int categoryId) async {
+    final db = await database;
+    final result = await db.query(
+      'categories',
+      where: 'id = ?',
+      whereArgs: [categoryId],
+    );
+    return result.isNotEmpty ? result.first : null;
+  }
+
+  static Future<void> clearCategories() async {
+    final db = await database;
+    await db.delete('categories'); // Удаляем все записи из таблицы категорий
+  }
+
+  static Future<void> ensureDefaultCategories() async {
+    final defaultCategories = [
+      {
+        'name': 'Продукты',
+        'icon': Icons.shopping_cart.codePoint,
+        'type': 'расход',
+        'customIconPath': null,
+        'isDefault': 1, // Сохраняем как INTEGER (1 для true)
+      },
+      {
+        'name': 'Транспорт',
+        'icon': Icons.directions_car.codePoint,
+        'type': 'расход',
+        'customIconPath': null,
+        'isDefault': 1,
+      },
+      {
+        'name': 'Развлечения',
+        'icon': Icons.movie.codePoint,
+        'type': 'расход',
+        'customIconPath': null,
+        'isDefault': 1,
+      },
+      {
+        'name': 'Зарплата',
+        'icon': Icons.attach_money.codePoint,
+        'type': 'доход',
+        'customIconPath': null,
+        'isDefault': 1,
+      },
+    ];
+
+    final db = await database;
+
+    for (final category in defaultCategories) {
+      final existingCategory = await db.query(
+        'categories',
+        where: 'name = ?',
+        whereArgs: [category['name']],
+      );
+      if (existingCategory.isEmpty) {
+        await db.insert('categories', category);
+      } else {
+        // Обновляем поле isDefault, если категория уже существует
+        await db.update(
+          'categories',
+          {'isDefault': 1},
+          where: 'name = ?',
+          whereArgs: [category['name']],
+        );
+      }
+    }
+  }
+
+  static Future<bool> categoryExists(String name) async {
+    final db = await database;
+    final result = await db.query(
+      'categories',
+      where: 'name = ?',
+      whereArgs: [name],
+    );
+    return result.isNotEmpty;
   }
 }

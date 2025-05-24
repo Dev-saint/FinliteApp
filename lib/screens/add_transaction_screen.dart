@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../services/database_service.dart';
 import '../main.dart'; // Добавлен импорт для доступа к глобальному методу
 import '../models/account.dart'; // Добавьте этот импорт, если Account определён в models/account.dart
+import 'dart:io'; // Импортируем dart:io для работы с File
 
 class AddTransactionScreen extends StatefulWidget {
   const AddTransactionScreen({super.key});
@@ -18,22 +19,17 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   final timeController = TextEditingController();
   final titleController = TextEditingController(); // Добавлено
   String? selectedType;
-  String? selectedCategory;
+  int? selectedCategoryId; // Выбранная категория
   DateTime? selectedDateTime;
   int? selectedAccountId;
-  final List<String> categories = [
-    'Продукты',
-    'Транспорт',
-    'Развлечения',
-    'Зарплата',
-    'Другое',
-  ];
+  List<Map<String, dynamic>> categories = []; // Список категорий из базы данных
   final List<Account> accounts = []; // Удалено поле balance из Account
 
   @override
   void initState() {
     super.initState();
     _loadAccounts(); // Загружаем список счетов при инициализации
+    _loadCategories(); // Загружаем категории из базы данных
   }
 
   @override
@@ -50,6 +46,16 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     setState(() {
       accounts.clear();
       accounts.addAll(data.map((a) => Account(id: a['id'], name: a['name'])));
+    });
+  }
+
+  Future<void> _loadCategories() async {
+    final fetchedCategories = await DatabaseService.getAllCategories();
+    setState(() {
+      categories =
+          fetchedCategories.map((category) {
+            return {'id': category['id'], 'name': category['name']};
+          }).toList();
     });
   }
 
@@ -104,7 +110,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             int.parse(amountController.text) *
             (selectedType == 'расход' ? -1 : 1), // Учитываем тип
         'type': selectedType,
-        'category': selectedCategory,
+        'category': selectedCategoryId, // Изменено на id категории
         'date': selectedDateTime?.toIso8601String(),
         'comment': commentController.text,
         'account_id': selectedAccountId, // Привязка к счету
@@ -125,6 +131,24 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         ).showSnackBar(SnackBar(content: Text(e.toString())));
       }
     }
+  }
+
+  Widget _buildCategoryIcon(Map<String, dynamic> category) {
+    if (category['customIconPath'] != null &&
+        File(category['customIconPath']).existsSync()) {
+      return Image.file(
+        File(category['customIconPath']),
+        width: 32,
+        height: 32,
+        fit: BoxFit.cover,
+      );
+    }
+    return Icon(
+      category['icon'] != null
+          ? IconData(category['icon'], fontFamily: 'MaterialIcons')
+          : Icons.label,
+      size: 32,
+    );
   }
 
   @override
@@ -172,19 +196,28 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                               : null,
                 ),
                 const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
+                DropdownButtonFormField<int?>(
                   decoration: const InputDecoration(labelText: 'Категория *'),
+                  value: selectedCategoryId,
+                  hint: const Text('Выберите категорию'),
                   items:
-                      categories
-                          .map(
-                            (cat) =>
-                                DropdownMenuItem(value: cat, child: Text(cat)),
-                          )
-                          .toList(),
-                  value: selectedCategory,
+                      categories.map((category) {
+                        return DropdownMenuItem<int?>(
+                          value: category['id'],
+                          child: Row(
+                            children: [
+                              _buildCategoryIcon(
+                                category,
+                              ), // Отображаем иконку категории
+                              const SizedBox(width: 8),
+                              Text(category['name']),
+                            ],
+                          ),
+                        );
+                      }).toList(),
                   onChanged: (value) {
                     setState(() {
-                      selectedCategory = value;
+                      selectedCategoryId = value;
                     });
                   },
                   validator:

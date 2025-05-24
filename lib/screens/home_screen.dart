@@ -4,6 +4,7 @@ import 'transaction_details_screen.dart';
 import '../models/account.dart' as model_account;
 import '../services/database_service.dart';
 import 'edit_account_screen.dart'; // Добавлен импорт
+import 'dart:io'; // Импортируем dart:io для работы с файлами
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -13,6 +14,13 @@ class HomeScreen extends StatefulWidget {
 }
 
 class HomeScreenState extends State<HomeScreen> {
+  @override
+  Widget build(BuildContext context) {
+    return buildTransactionSummary(
+      context,
+    ); // Заменяем статический виджет на вызов метода
+  }
+
   List<model_account.Account> accounts = [];
   int selectedAccountIndex = 0;
   int? selectedAccountId; // Добавлено: ID выбранного счета (null для "Все")
@@ -24,10 +32,13 @@ class HomeScreenState extends State<HomeScreen> {
   String selectedPeriodFilter = 'Все'; // По умолчанию показываем все периоды
   DateTimeRange? customDateRange; // Для произвольного периода
 
+  List<Map<String, dynamic>> categories = []; // Список категорий из базы данных
+
   @override
   void initState() {
     super.initState();
     _loadAccounts();
+    _loadCategories(); // Загружаем категории из базы данных
     _loadTransactions();
   }
 
@@ -146,7 +157,8 @@ class HomeScreenState extends State<HomeScreen> {
                 color: t['amount'] > 0 ? Colors.green : Colors.redAccent,
                 comment: t['comment'] ?? '',
               ),
-            ),
+            )
+            .toList(),
       );
     });
   }
@@ -177,20 +189,14 @@ class HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  // Получить иконку по категории
-  IconData _getCategoryIcon(String category) {
-    switch (category) {
-      case 'Продукты':
-        return Icons.shopping_cart;
-      case 'Транспорт':
-        return Icons.directions_car;
-      case 'Развлечения':
-        return Icons.movie;
-      case 'Зарплата':
-        return Icons.attach_money;
-      default:
-        return Icons.label;
-    }
+  Future<void> _loadCategories() async {
+    final fetchedCategories = await DatabaseService.getAllCategories();
+    setState(() {
+      categories =
+          fetchedCategories.map((category) {
+            return {'id': category['id'], 'name': category['name']};
+          }).toList();
+    });
   }
 
   Future<void> _openTransactionDetailsScreen(
@@ -201,12 +207,14 @@ class HomeScreenState extends State<HomeScreen> {
       _fadeRoute(
         TransactionDetailsScreen(
           id: card.id, // Передаем id транзакции
-          icon: _getCategoryIcon(card.category),
+          icon: _buildCategoryIcon(
+            card.category,
+          ), // Используем _buildCategoryIcon
           title: card.title,
           subtitle: card.subtitle,
           amount: card.amount,
           color: card.color,
-          category: card.category,
+          category: card.category['name'], // Передаем название категории
           comment: card.comment,
         ),
       ),
@@ -278,8 +286,7 @@ class HomeScreenState extends State<HomeScreen> {
     return '$totalBalance ₽';
   }
 
-  @override
-  Widget build(BuildContext context) {
+  Widget buildTransactionSummary(BuildContext context) {
     // Сводка по транзакциям
     final total = transactions.fold<int>(0, (sum, t) => sum + t.amount);
     final income = transactions
@@ -411,8 +418,13 @@ class HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: DropdownButtonFormField<String?>(
-                      value: selectedCategoryFilter,
+                    child: DropdownButtonFormField<int?>(
+                      value:
+                          selectedCategoryFilter != null
+                              ? int.tryParse(
+                                selectedCategoryFilter!,
+                              ) // Преобразуем строку в int
+                              : null,
                       decoration: const InputDecoration(
                         labelText: 'Категория',
                         border: OutlineInputBorder(),
@@ -423,24 +435,21 @@ class HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                       items: [
-                        const DropdownMenuItem(value: null, child: Text('Все')),
-                        ...{
-                          'Продукты',
-                          'Транспорт',
-                          'Развлечения',
-                          'Зарплата',
-                          'Другое',
-                          ...transactions.map((t) => t.category),
-                        }.map(
-                          (category) => DropdownMenuItem(
-                            value: category,
-                            child: Text(category),
-                          ),
+                        const DropdownMenuItem<int?>(
+                          value: null,
+                          child: Text('Все категории'),
                         ),
+                        ...categories.map((category) {
+                          return DropdownMenuItem<int?>(
+                            value: category['id'], // Используем id категории
+                            child: Text(category['name']),
+                          );
+                        }).toList(),
                       ],
                       onChanged: (value) {
                         setState(() {
-                          selectedCategoryFilter = value;
+                          selectedCategoryFilter =
+                              value?.toString(); // Сохраняем id как строку
                         });
                         _loadTransactions();
                       },
@@ -503,7 +512,17 @@ class HomeScreenState extends State<HomeScreen> {
                               .map(
                                 (transaction) => TransactionCard(
                                   id: transaction.id,
-                                  category: transaction.category,
+                                  category: categories.firstWhere(
+                                    (category) =>
+                                        category['id'] ==
+                                        int.tryParse(transaction.category),
+                                    orElse:
+                                        () => {
+                                          'name': 'Неизвестно',
+                                          'customIconPath': null,
+                                          'icon': null,
+                                        },
+                                  ), // Передаем всю категорию как Map<String, dynamic>
                                   title: transaction.title,
                                   subtitle: transaction.subtitle,
                                   amount:
@@ -516,7 +535,6 @@ class HomeScreenState extends State<HomeScreen> {
                                             context,
                                             card,
                                           ),
-                                  getCategoryIcon: _getCategoryIcon,
                                 ),
                               )
                               .toList(), // Преобразуем Iterable в List
@@ -524,11 +542,7 @@ class HomeScreenState extends State<HomeScreen> {
                   ),
                   // Итоги
                   Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                      vertical: 18,
-                      horizontal: 18,
-                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 18),
                     decoration: BoxDecoration(
                       color: Theme.of(context).colorScheme.surfaceContainerLow,
                       borderRadius: BorderRadius.circular(14),
@@ -597,14 +611,14 @@ class TransactionData {
 // --- Карточка транзакции ---
 class TransactionCard extends StatelessWidget {
   final String id;
-  final String category;
+  final Map<String, dynamic>
+  category; // Передаем категорию как Map<String, dynamic>
   final String title;
   final String subtitle;
   final String amount;
   final Color color;
   final String comment;
   final void Function(BuildContext, TransactionCard)? onTap;
-  final IconData Function(String)? getCategoryIcon;
 
   const TransactionCard({
     super.key,
@@ -616,14 +630,13 @@ class TransactionCard extends StatelessWidget {
     required this.color,
     required this.comment,
     this.onTap,
-    this.getCategoryIcon,
   });
 
   @override
   Widget build(BuildContext context) {
-    final IconData? iconData =
-        getCategoryIcon != null ? getCategoryIcon!(category) : null;
-    Widget leadingIcon = Icon(iconData, color: color);
+    Widget leadingIcon = _buildCategoryIcon(
+      category,
+    ); // Используем _buildCategoryIcon
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -690,5 +703,26 @@ class _SummaryDivider extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: 10),
       color: Theme.of(context).dividerColor.withAlpha((0.25 * 255).round()),
     );
+  }
+}
+
+Widget _buildCategoryIcon(Map<String, dynamic> category) {
+  final String? customIconPath = category['customIconPath'];
+  final int? iconCode = category['icon'];
+
+  if (customIconPath != null && File(customIconPath).existsSync()) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: Image.file(
+        File(customIconPath),
+        width: 32,
+        height: 32,
+        fit: BoxFit.cover,
+      ),
+    );
+  } else if (iconCode != null) {
+    return Icon(IconData(iconCode, fontFamily: 'MaterialIcons'), size: 32);
+  } else {
+    return const Icon(Icons.label, size: 32);
   }
 }

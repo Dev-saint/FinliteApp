@@ -128,21 +128,23 @@ class _MainNavigationState extends State<MainNavigation> {
     );
   }
 
-  PageTransitionSwitcherTransitionBuilder _getTransitionBuilder(int index) {
-    return (child, animation, secondaryAnimation) =>
-        FadeTransition(opacity: animation, child: child);
-  }
-
   @override
   Widget build(BuildContext context) {
     final navColor = Theme.of(context).colorScheme.primary;
     final navFg = Theme.of(context).colorScheme.onPrimary;
 
     return Scaffold(
-      body: IndexedStack(
+      /* body: IndexedStack(
         index: _selectedIndex,
         children:
             _screens, // Используем IndexedStack для сохранения состояния экранов
+      ), */
+      body: PageTransitionSwitcher(
+        duration: const Duration(milliseconds: 300),
+        transitionBuilder:
+            (child, animation, secondaryAnimation) =>
+                FadeTransition(opacity: animation, child: child),
+        child: _screens[_selectedIndex],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,

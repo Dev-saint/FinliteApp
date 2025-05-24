@@ -13,7 +13,7 @@ class Account {
 
 class TransactionDetailsScreen extends StatefulWidget {
   final String id;
-  final IconData icon;
+  final Widget icon;
   final String title;
   final String subtitle;
   final String amount;

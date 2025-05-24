@@ -2,33 +2,26 @@ import 'dart:io';
 import 'package:image/image.dart' as img;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:flutter/services.dart';
 import '../../services/database_service.dart';
 
-class EditCategoryScreen extends StatefulWidget {
-  final int categoryId; // Добавлено: id категории
-  final String initialName;
-  final IconData initialIcon;
-  final String initialType;
-  final String? initialCustomIconPath;
+class EditTransactionScreen extends StatefulWidget {
+  final int transactionId;
 
-  const EditCategoryScreen({
-    super.key,
-    required this.categoryId, // Добавлено
-    required this.initialName,
-    required this.initialIcon,
-    required this.initialType,
-    this.initialCustomIconPath,
-  });
+  const EditTransactionScreen({super.key, required this.transactionId});
 
   @override
-  State<EditCategoryScreen> createState() => _EditCategoryScreenState();
+  State<EditTransactionScreen> createState() => _EditTransactionScreenState();
 }
 
-class _EditCategoryScreenState extends State<EditCategoryScreen> {
-  late TextEditingController controller;
+class _EditTransactionScreenState extends State<EditTransactionScreen> {
+  late TextEditingController _amountController;
+  late TextEditingController _descriptionController;
   IconData? _selectedIcon;
   String? _customIconPath;
-  late String _selectedType;
+  String _selectedType = 'расход'; // По умолчанию расход
+  List<Map<String, dynamic>> categories = []; // Список категорий из базы данных
+  int? selectedCategoryId; // Выбранная категория
 
   static const List<IconData> _iconOptions = [
     Icons.shopping_cart,
@@ -43,18 +36,28 @@ class _EditCategoryScreenState extends State<EditCategoryScreen> {
     Icons.label,
   ];
 
-  List<Map<String, dynamic>> categories = []; // Список категорий
-  int? selectedCategoryId; // Выбранная категория
-
   @override
   void initState() {
     super.initState();
-    controller = TextEditingController(text: widget.initialName);
-    _selectedIcon =
-        widget.initialCustomIconPath == null ? widget.initialIcon : null;
-    _customIconPath = widget.initialCustomIconPath;
-    _selectedType = widget.initialType;
-    _loadCategories(); // Загрузка категорий из БД
+    _amountController = TextEditingController();
+    _descriptionController = TextEditingController();
+    _loadTransactionDetails(); // Загружаем данные транзакции
+    _loadCategories(); // Загружаем категории из базы данных
+  }
+
+  Future<void> _loadTransactionDetails() async {
+    final transaction = await DatabaseService.getTransactionById(
+      widget.transactionId.toString(),
+    );
+    if (transaction != null) {
+      setState(() {
+        _amountController.text = transaction['amount'].toString();
+        _descriptionController.text = transaction['description'] ?? '';
+        _selectedType = transaction['type'];
+        selectedCategoryId =
+            transaction['categoryId'] as int?; // Приводим к int?
+      });
+    }
   }
 
   Future<void> _loadCategories() async {
@@ -90,41 +93,38 @@ class _EditCategoryScreenState extends State<EditCategoryScreen> {
 
   @override
   void dispose() {
-    controller.dispose();
+    _amountController.dispose();
+    _descriptionController.dispose();
     super.dispose();
-  }
-
-  Widget _buildCategoryIcon(Map<String, dynamic> category) {
-    final String? customIconPath = category['customIconPath'];
-    final int? iconCode = category['icon'];
-
-    if (customIconPath != null && File(customIconPath).existsSync()) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(6),
-        child: Image.file(
-          File(customIconPath),
-          width: 32,
-          height: 32,
-          fit: BoxFit.cover,
-        ),
-      );
-    } else if (iconCode != null) {
-      return Icon(IconData(iconCode, fontFamily: 'MaterialIcons'), size: 32);
-    } else {
-      return const Icon(Icons.label, size: 32);
-    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Редактировать категорию')),
+      appBar: AppBar(title: const Text('Редактировать транзакцию')),
       body: Material(
         color: Theme.of(context).colorScheme.surface,
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
             children: [
+              TextFormField(
+                controller: _amountController,
+                decoration: const InputDecoration(labelText: 'Сумма'),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                inputFormatters: [
+                  // Форматирование ввода суммы
+                  FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
+                ],
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _descriptionController,
+                decoration: const InputDecoration(labelText: 'Описание'),
+              ),
+              const SizedBox(height: 16),
               Row(
                 children: [
                   const Text('Тип: ', style: TextStyle(fontSize: 16)),
@@ -140,13 +140,6 @@ class _EditCategoryScreenState extends State<EditCategoryScreen> {
                     },
                   ),
                 ],
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: controller,
-                decoration: const InputDecoration(
-                  labelText: 'Название категории',
-                ),
               ),
               const SizedBox(height: 16),
               Align(
@@ -233,42 +226,21 @@ class _EditCategoryScreenState extends State<EditCategoryScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              Row(
-                children: [
-                  const Text('Категория: ', style: TextStyle(fontSize: 16)),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: DropdownButton<int?>(
-                      value: selectedCategoryId,
-                      hint: const Text('Выберите категорию'),
-                      items: [
-                        const DropdownMenuItem<int?>(
-                          value: null,
-                          child: Text('Все категории'),
-                        ),
-                        ...categories.map((category) {
-                          return DropdownMenuItem<int?>(
-                            value: category['id'],
-                            child: Row(
-                              children: [
-                                _buildCategoryIcon(
-                                  category,
-                                ), // Отображаем иконку категории
-                                const SizedBox(width: 8),
-                                Text(category['name']),
-                              ],
-                            ),
-                          );
-                        }).toList(),
-                      ],
-                      onChanged: (value) {
-                        setState(() {
-                          selectedCategoryId = value;
-                        });
-                      },
-                    ),
-                  ),
-                ],
+              DropdownButtonFormField<int?>(
+                value: selectedCategoryId,
+                hint: const Text('Выберите категорию'),
+                items:
+                    categories.map((category) {
+                      return DropdownMenuItem<int?>(
+                        value: category['id'],
+                        child: Text(category['name']),
+                      );
+                    }).toList(),
+                onChanged: (value) {
+                  setState(() {
+                    selectedCategoryId = value;
+                  });
+                },
               ),
               const SizedBox(height: 24),
               ElevatedButton(
@@ -276,16 +248,18 @@ class _EditCategoryScreenState extends State<EditCategoryScreen> {
                   if (_customIconPath != null) {
                     await _resizeAndSaveCustomIcon(_customIconPath!);
                   }
-                  final updatedCategory = {
-                    'id': widget.categoryId, // Передаем id категории
-                    'name': controller.text.trim(),
+                  final updatedTransaction = {
+                    'id': widget.transactionId,
+                    'amount': double.tryParse(_amountController.text.trim()),
+                    'description': _descriptionController.text.trim(),
                     'icon':
                         _selectedIcon?.codePoint, // Сохраняем только codePoint
                     'type': _selectedType,
                     'customIconPath': _customIconPath,
+                    'categoryId': selectedCategoryId,
                   };
-                  await DatabaseService.updateCategory(
-                    updatedCategory,
+                  await DatabaseService.updateTransaction(
+                    updatedTransaction,
                   ); // Сохраняем в БД
                   if (!mounted) return;
                   Navigator.pop(

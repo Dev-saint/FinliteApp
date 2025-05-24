@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../theme/theme_provider.dart';
-import '../services/database_service.dart';
+import '../../services/database_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -82,6 +82,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 if (!mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Счета выведены в консоль')),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.category),
+              title: const Text('Вывести категории в консоль'),
+              onTap: () async {
+                await DatabaseService.printAllCategories();
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Категории выведены в консоль')),
                 );
               },
             ),

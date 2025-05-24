@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'add_category_screen.dart';
 import 'edit_category_screen.dart';
+import '../../services/database_service.dart';
+import 'dart:io';
 
 class CategoriesScreen extends StatefulWidget {
   const CategoriesScreen({super.key});
@@ -10,25 +12,15 @@ class CategoriesScreen extends StatefulWidget {
 }
 
 class CategoriesScreenState extends State<CategoriesScreen> {
-  final List<CategoryTile> categories = [];
+  List<Map<String, dynamic>> categories = [];
 
-  IconData _getCategoryIcon(String name) {
-    switch (name) {
-      case 'Продукты':
-        return Icons.shopping_cart;
-      case 'Транспорт':
-        return Icons.directions_car;
-      case 'Развлечения':
-        return Icons.movie;
-      case 'Зарплата':
-        return Icons.attach_money;
-      default:
-        return Icons.label;
+  void _openAddCategoryScreen(BuildContext context) async {
+    final result = await Navigator.of(
+      context,
+    ).push(_fadeRoute(const AddCategoryScreen()));
+    if (result == true) {
+      await _initializeCategories(); // Обновляем список категорий после добавления
     }
-  }
-
-  void _openAddCategoryScreen(BuildContext context) {
-    Navigator.of(context).push(_fadeRoute(const AddCategoryScreen()));
   }
 
   // Добавлено: универсальный fade route
@@ -43,6 +35,74 @@ class CategoriesScreenState extends State<CategoriesScreen> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    _initializeCategories();
+  }
+
+  Future<void> _initializeCategories() async {
+    await DatabaseService.ensureDefaultCategories(); // Убедиться, что предопределенные категории добавлены
+    final fetchedCategories =
+        await DatabaseService.getAllCategories(); // Получаем категории из базы
+    setState(() {
+      categories =
+          fetchedCategories.map((category) {
+            return {
+              ...category,
+              'isDefault':
+                  category['isDefault'] == 1, // Преобразуем 1/0 в true/false
+              'icon':
+                  category['icon'] != null
+                      ? IconData(category['icon'], fontFamily: 'MaterialIcons')
+                      : Icons.label, // Устанавливаем иконку по умолчанию
+            };
+          }).toList();
+
+      // Сортируем категории: сначала предопределенные, затем пользовательские, внутри групп по алфавиту
+      categories.sort((a, b) {
+        if (a['isDefault'] != b['isDefault']) {
+          return b['isDefault']
+              ? 1
+              : -1; // Предопределенные категории идут первыми
+        }
+        return a['name'].toString().compareTo(
+          b['name'].toString(),
+        ); // Сортировка по алфавиту
+      });
+    });
+  }
+
+  Future<void> _deleteCategory(int categoryId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Удалить категорию'),
+            content: const Text(
+              'Вы уверены, что хотите удалить эту категорию?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Отмена'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('Удалить'),
+              ),
+            ],
+          ),
+    );
+
+    if (confirm == true) {
+      await DatabaseService.deleteCategory(
+        categoryId,
+      ); // Удаляем категорию из базы
+      await _initializeCategories(); // Обновляем список категорий
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Категории')),
@@ -51,59 +111,45 @@ class CategoriesScreenState extends State<CategoriesScreen> {
         child: Column(
           children: [
             Expanded(
-              child: ListView(
+              child: ListView.builder(
                 padding: const EdgeInsets.all(16),
-                children: [
-                  CategoryTile(
-                    name: 'Продукты',
-                    isDefault: true,
-                    icon: _getCategoryIcon('Продукты'),
-                    type: 'расход',
-                    onEdit: null,
-                  ),
-                  CategoryTile(
-                    name: 'Транспорт',
-                    isDefault: true,
-                    icon: _getCategoryIcon('Транспорт'),
-                    type: 'расход',
-                    onEdit: null,
-                  ),
-                  CategoryTile(
-                    name: 'Развлечения',
-                    isDefault: true,
-                    icon: _getCategoryIcon('Развлечения'),
-                    type: 'расход',
-                    onEdit: null,
-                  ),
-                  CategoryTile(
-                    name: 'Зарплата',
-                    isDefault: true,
-                    icon: _getCategoryIcon('Зарплата'),
-                    type: 'доход',
-                    onEdit: null,
-                  ),
-                  // Пример пользовательской категории (можно удалить)
-                  CategoryTile(
-                    name: 'Моя категория',
-                    isDefault: false,
-                    icon: Icons.cake,
-                    type: 'доход',
-                    customIconPath: null,
-                    onEdit: (context, tile) {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder:
-                              (_) => EditCategoryScreen(
-                                initialName: tile.name,
-                                initialIcon: tile.icon,
-                                initialType: tile.type,
-                                initialCustomIconPath: tile.customIconPath,
-                              ),
-                        ),
-                      );
-                    },
-                  ),
-                ],
+                itemCount: categories.length,
+                itemBuilder: (context, index) {
+                  final category = categories[index];
+                  return CategoryTile(
+                    name: category['name'],
+                    isDefault:
+                        category['isDefault'], // Поле теперь корректно обрабатывается
+                    icon: category['icon'],
+                    type: category['type'],
+                    customIconPath: category['customIconPath'],
+                    onEdit:
+                        category['isDefault']
+                            ? null // Убираем кнопку редактирования для предопределенных категорий
+                            : (context, tile) async {
+                              final result = await Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder:
+                                      (_) => EditCategoryScreen(
+                                        categoryId: category['id'],
+                                        initialName: category['name'],
+                                        initialIcon: category['icon'],
+                                        initialType: category['type'],
+                                        initialCustomIconPath:
+                                            category['customIconPath'],
+                                      ),
+                                ),
+                              );
+                              if (result == true) {
+                                await _initializeCategories(); // Обновляем список категорий после редактирования
+                              }
+                            },
+                    onDelete:
+                        category['isDefault']
+                            ? null // Убираем кнопку удаления для предопределенных категорий
+                            : () => _deleteCategory(category['id']),
+                  );
+                },
               ),
             ),
             // --- Кнопка добавления категории под списком ---
@@ -141,6 +187,7 @@ class CategoryTile extends StatelessWidget {
   final String type;
   final String? customIconPath;
   final void Function(BuildContext, CategoryTile)? onEdit;
+  final VoidCallback? onDelete;
 
   const CategoryTile({
     super.key,
@@ -150,16 +197,20 @@ class CategoryTile extends StatelessWidget {
     this.type = 'расход',
     this.customIconPath,
     this.onEdit,
+    this.onDelete,
   });
 
   @override
   Widget build(BuildContext context) {
     return ListTile(
       leading:
-          customIconPath != null
-              ? (customIconPath!.startsWith('assets/')
-                  ? Image.asset(customIconPath!, width: 32, height: 32)
-                  : Icon(Icons.image, size: 32))
+          customIconPath != null && File(customIconPath!).existsSync()
+              ? Image.file(
+                File(customIconPath!),
+                width: 32,
+                height: 32,
+                fit: BoxFit.cover,
+              )
               : Icon(icon),
       title: Text(name),
       subtitle: Text('Тип: $type'),
@@ -170,16 +221,31 @@ class CategoryTile extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.edit, color: Colors.grey, size: 24),
-                    onPressed:
-                        onEdit != null ? () => onEdit!(context, this) : null,
-                    tooltip: 'Редактировать',
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                  ),
+                  if (onEdit != null)
+                    IconButton(
+                      icon: const Icon(
+                        Icons.edit,
+                        color: Colors.grey,
+                        size: 24,
+                      ),
+                      onPressed: () => onEdit!(context, this),
+                      tooltip: 'Редактировать',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
                   const SizedBox(width: 8),
-                  Icon(Icons.delete, color: Colors.redAccent, size: 24),
+                  if (onDelete != null)
+                    IconButton(
+                      icon: const Icon(
+                        Icons.delete,
+                        color: Colors.redAccent,
+                        size: 24,
+                      ),
+                      onPressed: onDelete,
+                      tooltip: 'Удалить',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
                 ],
               ),
     );

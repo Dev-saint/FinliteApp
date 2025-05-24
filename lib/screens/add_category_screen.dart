@@ -1,4 +1,10 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:image/image.dart' as img;
+import 'package:image_picker/image_picker.dart';
+
+import '../../services/database_service.dart';
 
 class AddCategoryScreen extends StatefulWidget {
   const AddCategoryScreen({super.key});
@@ -27,15 +33,71 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
     Icons.label,
   ];
 
+  List<Map<String, dynamic>> categories = []; // Список категорий
+  int? selectedCategoryId; // Выбранная категория (для выпадающего списка)
+
   Future<void> _pickCustomIcon() async {
-    // TODO: Реализовать выбор изображения через file_picker или image_picker
-    // Пример: _customIconPath = путь к выбранному файлу
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    if (pickedFile != null) {
+      setState(() {
+        _customIconPath = pickedFile.path;
+      });
+    }
+  }
+
+  Future<void> _resizeAndSaveCustomIcon(String path) async {
+    final file = File(path);
+    final bytes = await file.readAsBytes();
+    final image = img.decodeImage(bytes);
+    if (image != null) {
+      final resized = img.copyResize(image, width: 48, height: 48);
+      final resizedBytes = img.encodePng(resized);
+      await file.writeAsBytes(resizedBytes);
+    }
+  }
+
+  Future<void> _loadCategories() async {
+    final fetchedCategories = await DatabaseService.getAllCategories();
+    setState(() {
+      categories =
+          fetchedCategories.map((category) {
+            return {'id': category['id'], 'name': category['name']};
+          }).toList();
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCategories(); // Загрузка категорий при инициализации
   }
 
   @override
   void dispose() {
     controller.dispose();
     super.dispose();
+  }
+
+  Widget _buildCategoryIcon(Map<String, dynamic> category) {
+    final String? customIconPath = category['customIconPath'];
+    final int? iconCode = category['icon'];
+
+    if (customIconPath != null && File(customIconPath).existsSync()) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: Image.file(
+          File(customIconPath),
+          width: 32,
+          height: 32,
+          fit: BoxFit.cover,
+        ),
+      );
+    } else if (iconCode != null) {
+      return Icon(IconData(iconCode, fontFamily: 'MaterialIcons'), size: 32);
+    } else {
+      return const Icon(Icons.label, size: 32);
+    }
   }
 
   @override
@@ -168,12 +230,46 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
                     ],
                   ),
                 ),
+                const SizedBox(height: 16),
+
                 const SizedBox(height: 24),
                 ElevatedButton(
-                  onPressed: () {
+                  onPressed: () async {
                     if (_formKey.currentState?.validate() ?? false) {
-                      // TODO: сохранить категорию с выбранной иконкой или customIconPath
-                      Navigator.pop(context);
+                      if (_selectedIcon == null && _customIconPath == null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Выберите иконку для категории'),
+                          ),
+                        );
+                        return;
+                      }
+
+                      if (_customIconPath != null) {
+                        await _resizeAndSaveCustomIcon(_customIconPath!);
+                      }
+
+                      final newCategory = {
+                        'name': controller.text.trim(),
+                        'icon': _selectedIcon?.codePoint,
+                        'type': _selectedType,
+                        'customIconPath': _customIconPath,
+                      };
+
+                      try {
+                        await DatabaseService.addCategory(
+                          newCategory,
+                        ); // Сохраняем в БД
+                        if (!mounted) return;
+                        Navigator.pop(
+                          context,
+                          true,
+                        ); // Возвращаемся с флагом обновления
+                      } catch (e) {
+                        ScaffoldMessenger.of(
+                          context,
+                        ).showSnackBar(SnackBar(content: Text(e.toString())));
+                      }
                     }
                   },
                   child: const Text('Сохранить'),
