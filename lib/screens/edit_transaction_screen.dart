@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'package:image/image.dart' as img;
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:flutter/services.dart';
 import '../../services/database_service.dart';
 
@@ -17,32 +16,18 @@ class EditTransactionScreen extends StatefulWidget {
 class _EditTransactionScreenState extends State<EditTransactionScreen> {
   late TextEditingController _amountController;
   late TextEditingController _descriptionController;
-  IconData? _selectedIcon;
-  String? _customIconPath;
   String _selectedType = 'расход'; // По умолчанию расход
   List<Map<String, dynamic>> categories = []; // Список категорий из базы данных
   int? selectedCategoryId; // Выбранная категория
-
-  static const List<IconData> _iconOptions = [
-    Icons.shopping_cart,
-    Icons.directions_car,
-    Icons.movie,
-    Icons.attach_money,
-    Icons.fastfood,
-    Icons.home,
-    Icons.sports_soccer,
-    Icons.pets,
-    Icons.cake,
-    Icons.label,
-  ];
+  Map<String, dynamic>? selectedCategoryItem; // Выбранная категория как Map
 
   @override
   void initState() {
     super.initState();
     _amountController = TextEditingController();
     _descriptionController = TextEditingController();
-    _loadTransactionDetails(); // Загружаем данные транзакции
-    _loadCategories(); // Загружаем категории из базы данных
+    _loadTransactionDetails();
+    _loadCategories();
   }
 
   Future<void> _loadTransactionDetails() async {
@@ -54,8 +39,7 @@ class _EditTransactionScreenState extends State<EditTransactionScreen> {
         _amountController.text = transaction['amount'].toString();
         _descriptionController.text = transaction['description'] ?? '';
         _selectedType = transaction['type'];
-        selectedCategoryId =
-            transaction['categoryId'] as int?; // Приводим к int?
+        selectedCategoryId = transaction['categoryId'] as int?;
       });
     }
   }
@@ -63,21 +47,14 @@ class _EditTransactionScreenState extends State<EditTransactionScreen> {
   Future<void> _loadCategories() async {
     final fetchedCategories = await DatabaseService.getAllCategories();
     setState(() {
-      categories =
-          fetchedCategories.map((category) {
-            return {'id': category['id'], 'name': category['name']};
-          }).toList();
+      categories = List<Map<String, dynamic>>.from(fetchedCategories);
+      if (selectedCategoryId != null) {
+        selectedCategoryItem = categories.firstWhere(
+          (cat) => cat['id'] == selectedCategoryId,
+          orElse: () => <String, dynamic>{},
+        );
+      }
     });
-  }
-
-  Future<void> _pickCustomIcon() async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-    if (pickedFile != null) {
-      setState(() {
-        _customIconPath = pickedFile.path;
-      });
-    }
   }
 
   Future<void> _resizeAndSaveCustomIcon(String path) async {
@@ -100,14 +77,20 @@ class _EditTransactionScreenState extends State<EditTransactionScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Редактировать транзакцию')),
       body: Material(
-        color: Theme.of(context).colorScheme.surface,
+        color: colorScheme.surface,
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
             children: [
+              Center(
+                child: CategoryIconDisplay(category: selectedCategoryItem),
+              ),
+              const SizedBox(height: 24),
               TextFormField(
                 controller: _amountController,
                 decoration: const InputDecoration(labelText: 'Сумма'),
@@ -115,7 +98,6 @@ class _EditTransactionScreenState extends State<EditTransactionScreen> {
                   decimal: true,
                 ),
                 inputFormatters: [
-                  // Форматирование ввода суммы
                   FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
                 ],
               ),
@@ -142,130 +124,54 @@ class _EditTransactionScreenState extends State<EditTransactionScreen> {
                 ],
               ),
               const SizedBox(height: 16),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Иконка',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 12,
-                children:
-                    _iconOptions.map((icon) {
-                      final isSelected =
-                          _selectedIcon == icon && _customIconPath == null;
-                      return GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            _selectedIcon = icon;
-                            _customIconPath = null;
-                          });
-                        },
-                        child: CircleAvatar(
-                          backgroundColor:
-                              isSelected
-                                  ? Theme.of(context).colorScheme.primary
-                                      .withAlpha((0.2 * 255).toInt())
-                                  : Colors.grey.shade200,
-                          child: Icon(
-                            icon,
-                            color:
-                                isSelected
-                                    ? Theme.of(context).colorScheme.primary
-                                    : Colors.black54,
-                          ),
-                        ),
-                      );
-                    }).toList(),
-              ),
-              const SizedBox(height: 16),
-              Center(
-                child: Column(
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: () async {
-                        await _pickCustomIcon();
-                        setState(() {
-                          _selectedIcon = null;
-                          // _customIconPath уже обновлён
-                        });
-                      },
-                      icon: const Icon(Icons.add_photo_alternate),
-                      label: const Text('Загрузить свою иконку'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 12,
-                        ),
-                      ),
-                    ),
-                    if (_customIconPath != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 12),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child:
-                              _customIconPath!.startsWith('assets/')
-                                  ? Image.asset(
-                                    _customIconPath!,
-                                    width: 48,
-                                    height: 48,
-                                    fit: BoxFit.cover,
-                                  )
-                                  : Icon(
-                                    Icons.image,
-                                    size: 48,
-                                    color:
-                                        Theme.of(context).colorScheme.primary,
-                                  ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
               DropdownButtonFormField<int?>(
-                value: selectedCategoryId,
+                decoration: const InputDecoration(labelText: 'Категория *'),
+                value:
+                    categories.any((cat) => cat['id'] == selectedCategoryId)
+                        ? selectedCategoryId
+                        : null,
                 hint: const Text('Выберите категорию'),
                 items:
                     categories.map((category) {
                       return DropdownMenuItem<int?>(
                         value: category['id'],
-                        child: Text(category['name']),
+                        child: Row(
+                          children: [
+                            CategoryIconDisplay(category: category),
+                            const SizedBox(width: 8),
+                            Text(category['name']),
+                          ],
+                        ),
                       );
                     }).toList(),
                 onChanged: (value) {
-                  setState(() {
-                    selectedCategoryId = value;
-                  });
+                  if (value != null) {
+                    final selected = categories.firstWhere(
+                      (cat) => cat['id'] == value,
+                      orElse: () => <String, dynamic>{},
+                    );
+                    setState(() {
+                      selectedCategoryId = value;
+                      selectedCategoryItem = selected;
+                    });
+                  }
                 },
+                validator:
+                    (value) => value == null ? 'Выберите категорию' : null,
               ),
               const SizedBox(height: 24),
               ElevatedButton(
                 onPressed: () async {
-                  if (_customIconPath != null) {
-                    await _resizeAndSaveCustomIcon(_customIconPath!);
-                  }
                   final updatedTransaction = {
                     'id': widget.transactionId,
                     'amount': double.tryParse(_amountController.text.trim()),
                     'description': _descriptionController.text.trim(),
-                    'icon':
-                        _selectedIcon?.codePoint, // Сохраняем только codePoint
                     'type': _selectedType,
-                    'customIconPath': _customIconPath,
                     'categoryId': selectedCategoryId,
                   };
-                  await DatabaseService.updateTransaction(
-                    updatedTransaction,
-                  ); // Сохраняем в БД
+                  await DatabaseService.updateTransaction(updatedTransaction);
                   if (!mounted) return;
-                  Navigator.pop(
-                    context,
-                    true,
-                  ); // Возвращаемся с флагом обновления
+                  Navigator.pop(context, true);
                 },
                 child: const Text('Сохранить'),
               ),
@@ -274,5 +180,35 @@ class _EditTransactionScreenState extends State<EditTransactionScreen> {
         ),
       ),
     );
+  }
+}
+
+class CategoryIconDisplay extends StatelessWidget {
+  final Map<String, dynamic>? category;
+
+  const CategoryIconDisplay({super.key, this.category});
+
+  @override
+  Widget build(BuildContext context) {
+    if (category == null) return const Icon(Icons.label, size: 48);
+
+    final String? customIconPath = category!['customIconPath'];
+    final int? iconCode = category!['icon'];
+
+    if (customIconPath != null && File(customIconPath).existsSync()) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: Image.file(
+          File(customIconPath),
+          width: 48,
+          height: 48,
+          fit: BoxFit.cover,
+        ),
+      );
+    } else if (iconCode != null) {
+      return Icon(IconData(iconCode, fontFamily: 'MaterialIcons'), size: 48);
+    } else {
+      return const Icon(Icons.label, size: 48);
+    }
   }
 }

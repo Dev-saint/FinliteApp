@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:logging/logging.dart';
 import 'package:intl/intl.dart';
 import '../services/database_service.dart';
+import 'dart:io';
 
 // Temporary Account class definition (replace with your actual Account model or import)
 class Account {
@@ -50,6 +51,7 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
   DateTime? _selectedDateTime;
   late String _type = 'расход'; // Установлено значение по умолчанию
   int? selectedAccountId;
+  List<Map<String, dynamic>> categories = []; // Список категорий из базы данных
 
   final List<Account> accounts = []; // Добавлено: список счетов
 
@@ -74,6 +76,7 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
 
     // Загружаем список счетов и устанавливаем выбранный счет
     _loadAccounts();
+    _loadCategories(); // Загружаем категории из базы данных
   }
 
   Future<void> _loadAccounts() async {
@@ -95,6 +98,13 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
         });
       }
     }
+  }
+
+  Future<void> _loadCategories() async {
+    final fetchedCategories = await DatabaseService.getAllCategories();
+    setState(() {
+      categories = List<Map<String, dynamic>>.from(fetchedCategories);
+    });
   }
 
   DateTime? _tryParseDateTime(String text) {
@@ -158,18 +168,22 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
     super.dispose();
   }
 
-  IconData _getCategoryIcon(String category) {
-    switch (category) {
-      case 'Продукты':
-        return Icons.shopping_cart;
-      case 'Транспорт':
-        return Icons.directions_car;
-      case 'Развлечения':
-        return Icons.movie;
-      case 'Зарплата':
-        return Icons.attach_money;
-      default:
-        return Icons.label;
+  Widget _getCategoryIconWidget(Map<String, dynamic> category) {
+    if (category['customIconPath'] != null &&
+        File(category['customIconPath']).existsSync()) {
+      return Image.file(
+        File(category['customIconPath']),
+        width: 32,
+        height: 32,
+        fit: BoxFit.cover,
+      );
+    } else if (category['icon'] != null) {
+      return Icon(
+        IconData(category['icon'], fontFamily: 'MaterialIcons'),
+        size: 32,
+      );
+    } else {
+      return const Icon(Icons.label, size: 32);
     }
   }
 
@@ -319,11 +333,13 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final iconWidget = Icon(
-      _getCategoryIcon(_category),
-      color: _color,
-      size: 48,
+    final category = categories.firstWhere(
+      (cat) => cat['name'] == _category,
+      orElse:
+          () => {'name': 'Неизвестно', 'icon': null, 'customIconPath': null},
     );
+
+    final iconWidget = _getCategoryIconWidget(category);
 
     return Scaffold(
       appBar: AppBar(
@@ -426,35 +442,29 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
                     ),
                 const SizedBox(height: 8),
                 _isEditing
-                    ? DropdownButtonFormField<String>(
-                      value: _category,
+                    ? DropdownButtonFormField<int?>(
+                      value: int.tryParse(
+                        _category,
+                      ), // Преобразуем строку в int
                       decoration: const InputDecoration(labelText: 'Категория'),
-                      items: const [
-                        DropdownMenuItem(
-                          value: 'Продукты',
-                          child: Text('Продукты'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'Транспорт',
-                          child: Text('Транспорт'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'Развлечения',
-                          child: Text('Развлечения'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'Зарплата',
-                          child: Text('Зарплата'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'Другое',
-                          child: Text('Другое'),
-                        ),
-                      ],
+                      items:
+                          categories.map((category) {
+                            return DropdownMenuItem<int?>(
+                              value: category['id'],
+                              child: Row(
+                                children: [
+                                  _getCategoryIconWidget(category),
+                                  const SizedBox(width: 8),
+                                  Text(category['name']),
+                                ],
+                              ),
+                            );
+                          }).toList(),
                       onChanged: (value) {
                         if (value != null) {
                           setState(() {
-                            _category = value;
+                            _category =
+                                value.toString(); // Сохраняем id как строку
                             _color = _getCategoryColor(_category);
                             _updateTypeFromCategory(_category); // Обновляем тип
                           });
@@ -462,9 +472,7 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
                       },
                       validator:
                           (value) =>
-                              value == null || value.isEmpty
-                                  ? 'Выберите категорию'
-                                  : null,
+                              value == null ? 'Выберите категорию' : null,
                     )
                     : Text(
                       'Категория: $_category',

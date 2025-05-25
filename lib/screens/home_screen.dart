@@ -192,10 +192,7 @@ class HomeScreenState extends State<HomeScreen> {
   Future<void> _loadCategories() async {
     final fetchedCategories = await DatabaseService.getAllCategories();
     setState(() {
-      categories =
-          fetchedCategories.map((category) {
-            return {'id': category['id'], 'name': category['name']};
-          }).toList();
+      categories = List<Map<String, dynamic>>.from(fetchedCategories);
     });
   }
 
@@ -442,9 +439,30 @@ class HomeScreenState extends State<HomeScreen> {
                         ...categories.map((category) {
                           return DropdownMenuItem<int?>(
                             value: category['id'], // Используем id категории
-                            child: Text(category['name']),
+                            child: Row(
+                              children: [
+                                if (category['customIconPath'] != null &&
+                                    File(
+                                      category['customIconPath'],
+                                    ).existsSync())
+                                  Image.file(
+                                    File(category['customIconPath']),
+                                    width: 24,
+                                    height: 24,
+                                  )
+                                else
+                                  Icon(
+                                    IconData(
+                                      category['icon'] ?? Icons.label.codePoint,
+                                      fontFamily: 'MaterialIcons',
+                                    ),
+                                  ),
+                                const SizedBox(width: 8),
+                                Text(category['name']),
+                              ],
+                            ),
                           );
-                        }).toList(),
+                        }),
                       ],
                       onChanged: (value) {
                         setState(() {
@@ -634,9 +652,24 @@ class TransactionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Widget leadingIcon = _buildCategoryIcon(
-      category,
-    ); // Используем _buildCategoryIcon
+    Widget leadingIcon;
+    if (category['customIconPath'] != null &&
+        File(category['customIconPath']).existsSync()) {
+      leadingIcon = Image.file(
+        File(category['customIconPath']),
+        width: 32,
+        height: 32,
+        fit: BoxFit.cover,
+      );
+    } else {
+      leadingIcon = Icon(
+        IconData(
+          category['icon'] ?? Icons.label.codePoint,
+          fontFamily: 'MaterialIcons',
+        ),
+        color: color,
+      );
+    }
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),

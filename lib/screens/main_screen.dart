@@ -59,7 +59,7 @@ class _MainScreenState extends State<MainScreen> {
                   value: category['id'],
                   child: Text(category['name']),
                 );
-              }).toList(),
+              }),
             ],
             onChanged: (value) async {
               await _filterTransactionsByCategory(value);

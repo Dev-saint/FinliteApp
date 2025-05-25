@@ -94,27 +94,6 @@ class _EditCategoryScreenState extends State<EditCategoryScreen> {
     super.dispose();
   }
 
-  Widget _buildCategoryIcon(Map<String, dynamic> category) {
-    final String? customIconPath = category['customIconPath'];
-    final int? iconCode = category['icon'];
-
-    if (customIconPath != null && File(customIconPath).existsSync()) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(6),
-        child: Image.file(
-          File(customIconPath),
-          width: 32,
-          height: 32,
-          fit: BoxFit.cover,
-        ),
-      );
-    } else if (iconCode != null) {
-      return Icon(IconData(iconCode, fontFamily: 'MaterialIcons'), size: 32);
-    } else {
-      return const Icon(Icons.label, size: 32);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -231,44 +210,6 @@ class _EditCategoryScreenState extends State<EditCategoryScreen> {
                       ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  const Text('Категория: ', style: TextStyle(fontSize: 16)),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: DropdownButton<int?>(
-                      value: selectedCategoryId,
-                      hint: const Text('Выберите категорию'),
-                      items: [
-                        const DropdownMenuItem<int?>(
-                          value: null,
-                          child: Text('Все категории'),
-                        ),
-                        ...categories.map((category) {
-                          return DropdownMenuItem<int?>(
-                            value: category['id'],
-                            child: Row(
-                              children: [
-                                _buildCategoryIcon(
-                                  category,
-                                ), // Отображаем иконку категории
-                                const SizedBox(width: 8),
-                                Text(category['name']),
-                              ],
-                            ),
-                          );
-                        }).toList(),
-                      ],
-                      onChanged: (value) {
-                        setState(() {
-                          selectedCategoryId = value;
-                        });
-                      },
-                    ),
-                  ),
-                ],
               ),
               const SizedBox(height: 24),
               ElevatedButton(

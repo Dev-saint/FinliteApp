@@ -52,10 +52,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   Future<void> _loadCategories() async {
     final fetchedCategories = await DatabaseService.getAllCategories();
     setState(() {
-      categories =
-          fetchedCategories.map((category) {
-            return {'id': category['id'], 'name': category['name']};
-          }).toList();
+      categories = List<Map<String, dynamic>>.from(fetchedCategories);
     });
   }
 

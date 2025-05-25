@@ -79,27 +79,6 @@ class _AddCategoryScreenState extends State<AddCategoryScreen> {
     super.dispose();
   }
 
-  Widget _buildCategoryIcon(Map<String, dynamic> category) {
-    final String? customIconPath = category['customIconPath'];
-    final int? iconCode = category['icon'];
-
-    if (customIconPath != null && File(customIconPath).existsSync()) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(6),
-        child: Image.file(
-          File(customIconPath),
-          width: 32,
-          height: 32,
-          fit: BoxFit.cover,
-        ),
-      );
-    } else if (iconCode != null) {
-      return Icon(IconData(iconCode, fontFamily: 'MaterialIcons'), size: 32);
-    } else {
-      return const Icon(Icons.label, size: 32);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
