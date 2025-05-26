@@ -1,259 +1,536 @@
-import 'dart:math';
-
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import '../services/database_service.dart';
 
-class ReportsScreen extends StatelessWidget {
+class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
 
-  // Используем те же транзакции, что и на главной
-  List<_Transaction> get _transactions => [
-    _Transaction(
-      title: 'Продукты',
-      category: 'Продукты',
-      date: '2025-05-12 14:30:00',
-      amount: -650,
-    ),
-    _Transaction(
-      title: 'Зарплата',
-      category: 'Зарплата',
-      date: '2025-05-10 09:00:00',
-      amount: 15000,
-    ),
+  @override
+  State<ReportsScreen> createState() => _ReportsScreenState();
+}
+
+class _ReportsScreenState extends State<ReportsScreen> {
+  String selectedPeriod = 'Месяц';
+  String selectedReportType = '📊 Расходы по категориям';
+  DateTimeRange? customDateRange;
+  List<Map<String, dynamic>> transactions = [];
+  List<Map<String, dynamic>> categories = [];
+  List<Map<String, dynamic>> accounts = [];
+  Map<String, Color> categoryColors = {};
+  bool generatePressed = false;
+
+  final List<String> reportTypes = [
+    '📊 Расходы по категориям',
+    '📊 Доходы по категориям',
+    '📊 Распределение по счетам',
+    '📉 Сравнение доходов/расходов по датам',
+    '📉 Сравнение по счетам',
+    '📉 Сравнение категорий',
+  ];
+
+  final List<String> periodOptions = [
+    'Сегодня',
+    'Неделя',
+    'Месяц',
+    'Год',
+    'Произвольный период',
+    'Все',
   ];
 
   @override
-  Widget build(BuildContext context) {
-    // Группируем по категориям и считаем суммы
-    final Map<String, _PieData> categoryData = {};
-    for (final t in _transactions) {
-      final key = t.category;
-      final color = _getCategoryColor(key);
-      if (!categoryData.containsKey(key)) {
-        categoryData[key] = _PieData(key, 0, color);
-      }
-      categoryData[key] = categoryData[key]!.copyWith(
-        value: categoryData[key]!.value + t.amount.abs(),
-      );
-    }
-    final data = categoryData.values.toList();
-    final total = data.fold<double>(0, (sum, d) => sum + d.value.abs());
+  void initState() {
+    super.initState();
+    _loadAll();
+  }
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Отчёты')),
-      body: Material(
-        color: Theme.of(context).colorScheme.surface,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
+  Future<void> _loadAll() async {
+    final fetchedTransactions = await DatabaseService.getAllTransactions();
+    final fetchedCategories = await DatabaseService.getAllCategories();
+    final fetchedAccounts = await DatabaseService.getAllAccounts();
+    setState(() {
+      transactions = fetchedTransactions;
+      categories = fetchedCategories;
+      accounts = fetchedAccounts;
+      generatePressed = false;
+    });
+  }
+
+  bool _isInSelectedPeriod(DateTime date) {
+    final now = DateTime.now();
+    switch (selectedPeriod) {
+      case 'Сегодня':
+        return date.year == now.year &&
+            date.month == now.month &&
+            date.day == now.day;
+      case 'Неделя':
+        return date.isAfter(now.subtract(const Duration(days: 7)));
+      case 'Месяц':
+        return date.year == now.year && date.month == now.month;
+      case 'Год':
+        return date.year == now.year;
+      case 'Произвольный период':
+        if (customDateRange == null) return true;
+        return date.isAfter(
+              customDateRange!.start.subtract(const Duration(days: 1)),
+            ) &&
+            date.isBefore(customDateRange!.end.add(const Duration(days: 1)));
+      default:
+        return true;
+    }
+  }
+
+  Widget _buildReportChart() {
+    switch (selectedReportType) {
+      case '📊 Расходы по категориям':
+        return _buildPieChart(false);
+      case '📊 Доходы по категориям':
+        return _buildPieChart(true);
+      case '📊 Распределение по счетам':
+        return _buildAccountsPieChart();
+      case '📉 Сравнение доходов/расходов по датам':
+        return _buildBarChart();
+      case '📉 Сравнение по счетам':
+        return _buildAccountComparisonChart();
+      case '📉 Сравнение категорий':
+        return _buildCategoryComparisonChart();
+      default:
+        return const Center(child: Text('Тип отчета в разработке'));
+    }
+  }
+
+  Widget _buildPieChart(bool isIncome) {
+    final filtered = transactions.where((tx) {
+      final date = DateTime.tryParse(tx['date'] ?? '') ?? DateTime.now();
+      final amount = tx['amount'];
+      return _isInSelectedPeriod(date) &&
+          ((isIncome && amount > 0) || (!isIncome && amount < 0));
+    });
+
+    final Map<String, int> categoryTotals = {};
+    for (var tx in filtered) {
+      final dynamic rawCategoryId = tx['category'] ?? tx['categoryId'];
+      final int? categoryId =
+          rawCategoryId is String ? int.tryParse(rawCategoryId) : rawCategoryId;
+      final category = categories.firstWhere(
+        (cat) => cat['id'] == categoryId,
+        orElse: () => {'name': 'Неизвестно'},
+      );
+      final name = category['name'];
+      categoryTotals[name] =
+          (categoryTotals[name] ?? 0) + (tx['amount'] as num).abs().toInt();
+    }
+
+    final total = categoryTotals.values.fold(0, (a, b) => a + b);
+    final List<Color> colors = [
+      Colors.blue,
+      Colors.green,
+      Colors.orange,
+      Colors.purple,
+      Colors.red,
+      Colors.teal,
+      Colors.indigo,
+    ];
+    int colorIndex = 0;
+    categoryColors.clear();
+
+    final sections =
+        categoryTotals.entries.map((e) {
+          final color = colors[colorIndex++ % colors.length];
+          categoryColors[e.key] = color;
+          final percentage = (e.value / total * 100).toStringAsFixed(1);
+          return PieChartSectionData(
+            color: color,
+            value: e.value.toDouble(),
+            title: '$percentage%',
+            titleStyle: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
+            radius: 100,
+          );
+        }).toList();
+
+    return LayoutBuilder(
+      builder:
+          (context, constraints) => Column(
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      decoration: const InputDecoration(labelText: 'Период'),
-                      items: const [
-                        DropdownMenuItem(value: 'месяц', child: Text('Месяц')),
-                        DropdownMenuItem(
-                          value: 'неделя',
-                          child: Text('Неделя'),
-                        ),
-                        DropdownMenuItem(value: 'год', child: Text('Год')),
-                      ],
-                      onChanged: (_) {},
-                    ),
+              SizedBox(
+                height: constraints.maxHeight * 0.7,
+                child: PieChart(
+                  PieChartData(
+                    sections: sections,
+                    centerSpaceRadius: 40,
+                    sectionsSpace: 2,
+                    pieTouchData: PieTouchData(enabled: true),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      decoration: const InputDecoration(labelText: 'Тип'),
-                      items: const [
-                        DropdownMenuItem(
-                          value: 'категории',
-                          child: Text('По категориям'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'типам',
-                          child: Text('По типам операций'),
-                        ),
-                      ],
-                      onChanged: (_) {},
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              Expanded(
-                child: Container(
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  alignment: Alignment.center,
-                  child: _PieChartWidget(data: data, total: total),
                 ),
               ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 12,
+                children:
+                    categoryColors.entries
+                        .map(
+                          (e) => Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(width: 12, height: 12, color: e.value),
+                              const SizedBox(width: 6),
+                              Text(e.key),
+                            ],
+                          ),
+                        )
+                        .toList(),
+              ),
             ],
+          ),
+    );
+  }
+
+  Widget _buildAccountsPieChart() {
+    final Map<String, int> accountTotals = {};
+    for (var tx in transactions) {
+      final date = DateTime.tryParse(tx['date'] ?? '') ?? DateTime.now();
+      if (!_isInSelectedPeriod(date)) continue;
+      final accId = tx['accountId'];
+      final account = accounts.firstWhere(
+        (a) => a['id'] == accId,
+        orElse: () => {'name': 'Неизвестно'},
+      );
+      final name = account['name'];
+      accountTotals[name] =
+          (accountTotals[name] ?? 0) + (tx['amount'] as num).abs().toInt();
+    }
+
+    final total = accountTotals.values.fold(0, (a, b) => a + b);
+    final List<Color> colors = [
+      Colors.blue,
+      Colors.green,
+      Colors.orange,
+      Colors.purple,
+      Colors.red,
+      Colors.teal,
+      Colors.indigo,
+    ];
+    int colorIndex = 0;
+
+    final sections =
+        accountTotals.entries.map((e) {
+          final color = colors[colorIndex++ % colors.length];
+          return PieChartSectionData(
+            color: color,
+            value: e.value.toDouble(),
+            title: '${(e.value / total * 100).toStringAsFixed(1)}%',
+            radius: 100,
+          );
+        }).toList();
+
+    return PieChart(
+      PieChartData(sections: sections, centerSpaceRadius: 40, sectionsSpace: 2),
+    );
+  }
+
+  Widget _buildBarChart() {
+    final Map<String, double> income = {}, expense = {};
+    for (var tx in transactions) {
+      final date = DateTime.tryParse(tx['date'] ?? '');
+      if (date == null || !_isInSelectedPeriod(date)) continue;
+      final key = DateFormat('dd.MM').format(date);
+      final amount = tx['amount']?.toDouble() ?? 0;
+      if (amount >= 0) {
+        income[key] = (income[key] ?? 0) + amount;
+      } else {
+        expense[key] = (expense[key] ?? 0) + amount.abs();
+      }
+    }
+
+    final allDates = {...income.keys, ...expense.keys}.toList()..sort();
+    final bars = <BarChartGroupData>[];
+    for (int i = 0; i < allDates.length; i++) {
+      final key = allDates[i];
+      bars.add(
+        BarChartGroupData(
+          x: i,
+          barRods: [
+            if (income.containsKey(key))
+              BarChartRodData(
+                toY: income[key]!,
+                color: Colors.green,
+                width: 12,
+              ),
+            if (expense.containsKey(key))
+              BarChartRodData(toY: expense[key]!, color: Colors.red, width: 12),
+          ],
+        ),
+      );
+    }
+
+    return BarChart(
+      BarChartData(
+        barGroups: bars,
+        titlesData: FlTitlesData(
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget: (value, _) {
+                final index = value.toInt();
+                if (index < 0 || index >= allDates.length) {
+                  return const SizedBox();
+                }
+                return Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: Text(
+                    allDates[index],
+                    style: const TextStyle(fontSize: 10),
+                  ),
+                );
+              },
+            ),
+          ),
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 40,
+              getTitlesWidget:
+                  (value, _) => Text(
+                    '${value.toInt()}',
+                    style: const TextStyle(fontSize: 10),
+                  ),
+            ),
+          ),
+          rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAccountComparisonChart() {
+    final Map<String, double> balances = {};
+    for (var tx in transactions) {
+      final date = DateTime.tryParse(tx['date'] ?? '');
+      if (date == null || !_isInSelectedPeriod(date)) continue;
+      final accId = tx['accountId'];
+      final account = accounts.firstWhere(
+        (a) => a['id'] == accId,
+        orElse: () => {'name': 'Неизвестно'},
+      );
+      final name = account['name'];
+      balances[name] = (balances[name] ?? 0) + (tx['amount'] as num).toDouble();
+    }
+
+    final labels = balances.keys.toList();
+    final bars =
+        labels.asMap().entries.map((e) {
+          return BarChartGroupData(
+            x: e.key,
+            barRods: [
+              BarChartRodData(
+                toY: balances[e.value]!,
+                color: Colors.blue,
+                width: 12,
+              ),
+            ],
+          );
+        }).toList();
+
+    return BarChart(
+      BarChartData(
+        barGroups: bars,
+        titlesData: FlTitlesData(
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget: (value, _) {
+                final index = value.toInt();
+                if (index < 0 || index >= labels.length) {
+                  return const SizedBox();
+                }
+                return Text(
+                  labels[index],
+                  style: const TextStyle(fontSize: 10),
+                );
+              },
+            ),
+          ),
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget:
+                  (value, _) => Text(
+                    '${value.toInt()}',
+                    style: const TextStyle(fontSize: 10),
+                  ),
+            ),
           ),
         ),
       ),
     );
   }
 
-  // Цвета для категорий (можно расширить)
-  Color _getCategoryColor(String category) {
-    switch (category) {
-      case 'Продукты':
-        return Colors.redAccent;
-      case 'Зарплата':
-        return Colors.green;
-      case 'Транспорт':
-        return Colors.blue;
-      case 'Развлечения':
-        return Colors.orange;
-      default:
-        return Colors.grey;
+  Widget _buildCategoryComparisonChart() {
+    final Map<String, double> totals = {};
+    for (var tx in transactions) {
+      final date = DateTime.tryParse(tx['date'] ?? '');
+      if (date == null || !_isInSelectedPeriod(date)) continue;
+      final categoryId = tx['category'] ?? tx['categoryId'];
+      final category = categories.firstWhere(
+        (c) => c['id'].toString() == categoryId.toString(),
+        orElse: () => {'name': 'Неизвестно'},
+      );
+      final name = category['name'];
+      totals[name] =
+          (totals[name] ?? 0) + (tx['amount'] as num).abs().toDouble();
     }
-  }
-}
 
-class _Transaction {
-  final String title;
-  final String category;
-  final String date;
-  final int amount;
-
-  _Transaction({
-    required this.title,
-    required this.category,
-    required this.date,
-    required this.amount,
-  });
-}
-
-class _PieData {
-  final String label;
-  final double value;
-  final Color color;
-  _PieData(this.label, this.value, this.color);
-
-  _PieData copyWith({double? value}) =>
-      _PieData(label, value ?? this.value, color);
-}
-
-class _PieChartWidget extends StatelessWidget {
-  final List<_PieData> data;
-  final double total;
-  const _PieChartWidget({required this.data, required this.total});
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final size = constraints.biggest.shortestSide * 0.7;
-        return Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            SizedBox(
-              width: size,
-              height: size,
-              child: CustomPaint(
-                painter: _PieChartPainter(data, total),
-                child: Stack(children: _buildLabels(size, data, total)),
+    final labels = totals.keys.toList();
+    final bars =
+        labels.asMap().entries.map((e) {
+          return BarChartGroupData(
+            x: e.key,
+            barRods: [
+              BarChartRodData(
+                toY: totals[e.value]!,
+                color: Colors.deepPurple,
+                width: 12,
               ),
+            ],
+          );
+        }).toList();
+
+    return BarChart(
+      BarChartData(
+        barGroups: bars,
+        titlesData: FlTitlesData(
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget: (value, _) {
+                final index = value.toInt();
+                if (index < 0 || index >= labels.length) {
+                  return const SizedBox();
+                }
+                return Text(
+                  labels[index],
+                  style: const TextStyle(fontSize: 10),
+                );
+              },
             ),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 16,
-              runSpacing: 8,
-              children:
-                  data.map((d) {
-                    final percent = total > 0 ? (d.value / total * 100) : 0;
-                    return Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(width: 16, height: 16, color: d.color),
-                        const SizedBox(width: 6),
-                        Text(
-                          '${d.label} (${d.value.abs().toInt()} ₽, ${percent.toStringAsFixed(1)}%)',
-                        ),
-                      ],
-                    );
-                  }).toList(),
+          ),
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget:
+                  (value, _) => Text(
+                    '${value.toInt()}',
+                    style: const TextStyle(fontSize: 10),
+                  ),
             ),
-          ],
-        );
-      },
+          ),
+        ),
+      ),
     );
   }
 
-  // Генерация подписей процентов на диаграмме
-  List<Widget> _buildLabels(double size, List<_PieData> data, double total) {
-    final List<Widget> labels = [];
-    double startRadian = -3.14 / 2;
-    final radius = size / 2;
-    for (final d in data) {
-      final sweep = total > 0 ? (d.value.abs() / total) * 3.1415926535 * 2 : 0;
-      final percent = total > 0 ? (d.value / total * 100) : 0;
-      if (percent > 5) {
-        // Показываем только если больше 5%
-        final angle = startRadian + sweep / 2;
-        final x = radius + (radius * 0.6) * (cos(angle));
-        final y = radius + (radius * 0.6) * (sin(angle));
-        labels.add(
-          Positioned(
-            left: x - 18,
-            top: y - 10,
-            child: Text(
-              '${percent.toStringAsFixed(1)}%',
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.black87,
-                fontWeight: FontWeight.bold,
-                shadows: [
-                  Shadow(
-                    color: Colors.white.withAlpha((0.7 * 255).toInt()),
-                    blurRadius: 4,
+  Future<void> _selectCustomDateRange() async {
+    final range = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (range != null) {
+      setState(() {
+        customDateRange = range;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isWeeklyReport = selectedReportType == '📈 Баланс по дням';
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Отчёты')),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: selectedPeriod,
+                    decoration: const InputDecoration(labelText: 'Период'),
+                    items:
+                        isWeeklyReport
+                            ? [
+                              const DropdownMenuItem(
+                                value: 'Неделя',
+                                child: Text('Неделя'),
+                              ),
+                            ]
+                            : periodOptions
+                                .map(
+                                  (e) => DropdownMenuItem(
+                                    value: e,
+                                    child: Text(e),
+                                  ),
+                                )
+                                .toList(),
+                    onChanged:
+                        isWeeklyReport
+                            ? null
+                            : (value) {
+                              if (value == 'Произвольный период') {
+                                _selectCustomDateRange();
+                              }
+                              setState(() => selectedPeriod = value!);
+                            },
                   ),
-                ],
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: selectedReportType,
+                    decoration: const InputDecoration(labelText: 'Тип отчета'),
+                    items:
+                        reportTypes
+                            .map(
+                              (e) => DropdownMenuItem(value: e, child: Text(e)),
+                            )
+                            .toList(),
+                    onChanged:
+                        (value) => setState(() {
+                          selectedReportType = value!;
+                          generatePressed = false;
+                        }),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerRight,
+              child: ElevatedButton(
+                onPressed: () => setState(() => generatePressed = true),
+                child: const Text('Построить отчет'),
               ),
             ),
-          ),
-        );
-      }
-      startRadian += sweep;
-    }
-    return labels;
+            const SizedBox(height: 20),
+            Expanded(
+              child:
+                  generatePressed
+                      ? _buildReportChart()
+                      : const Center(
+                        child: Text(
+                          'Выберите параметры и нажмите "Построить отчет"',
+                        ),
+                      ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
-}
-
-class _PieChartPainter extends CustomPainter {
-  final List<_PieData> data;
-  final double total;
-  _PieChartPainter(this.data, this.total);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = Offset.zero & size;
-    final center = rect.center;
-    final radius = size.width / 2;
-    double startRadian = -3.14 / 2;
-    final paint = Paint()..style = PaintingStyle.fill;
-
-    for (final d in data) {
-      final sweep = total > 0 ? (d.value.abs() / total) * 3.1415926535 * 2 : 0;
-      paint.color = d.color;
-      canvas.drawArc(
-        Rect.fromCircle(center: center, radius: radius),
-        startRadian,
-        sweep.toDouble(),
-        true,
-        paint,
-      );
-      startRadian += sweep;
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
