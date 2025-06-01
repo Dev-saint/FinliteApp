@@ -15,29 +15,20 @@ import 'package:logging/logging.dart';
 
 void main() async {
   // Настройка логгера
-  Logger.root.level = Level.ALL; // Уровень логов, которые ты хочешь видеть
+  Logger.root.level = Level.ALL;
   Logger.root.onRecord.listen((record) {
-    // Вывод логов в консоль
     print(
       '${record.level.name}: ${record.time}: ${record.loggerName}: ${record.message}',
     );
   });
 
   WidgetsFlutterBinding.ensureInitialized();
-  await initializeDateFormatting('ru', null); // Инициализация локали
+  await initializeDateFormatting('ru', null);
 
   runApp(
     MultiProvider(
-      providers: [
-        ChangeNotifierProvider(
-          create:
-              (_) => ThemeProvider(), // Убедились, что ThemeProvider передается
-        ),
-      ],
-      child: Builder(
-        // Оборачиваем FinliteApp в Builder
-        builder: (context) => const FinliteApp(),
-      ),
+      providers: [ChangeNotifierProvider(create: (_) => ThemeProvider())],
+      child: Builder(builder: (context) => const FinliteApp()),
     ),
   );
 }
@@ -54,11 +45,20 @@ class FinliteApp extends StatelessWidget {
       theme: lightTheme,
       darkTheme: darkTheme,
       themeMode: themeProvider.currentTheme,
+      debugShowCheckedModeBanner: false, // Убираем пометку "Debug"
+      builder: (context, child) {
+        return MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            size: const Size(360, 640), // Устанавливаем минимальные размеры
+          ),
+          child: child!,
+        );
+      },
       localizationsDelegates: [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
-      ], // Убрано const, так как список содержит не константы
+      ],
       supportedLocales: const [
         Locale('ru', 'RU'), // Русская локализация
         Locale('en', 'US'), // Английская локализация

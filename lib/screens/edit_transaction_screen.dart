@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'package:image/image.dart' as img;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../services/database_service.dart';
@@ -39,7 +38,7 @@ class _EditTransactionScreenState extends State<EditTransactionScreen> {
         _amountController.text = transaction['amount'].toString();
         _descriptionController.text = transaction['description'] ?? '';
         _selectedType = transaction['type'];
-        selectedCategoryId = transaction['categoryId'] as int?;
+        selectedCategoryId = transaction['category'] as int?;
       });
     }
   }
@@ -55,17 +54,6 @@ class _EditTransactionScreenState extends State<EditTransactionScreen> {
         );
       }
     });
-  }
-
-  Future<void> _resizeAndSaveCustomIcon(String path) async {
-    final file = File(path);
-    final bytes = await file.readAsBytes();
-    final image = img.decodeImage(bytes);
-    if (image != null) {
-      final resized = img.copyResize(image, width: 48, height: 48);
-      final resizedBytes = img.encodePng(resized);
-      await file.writeAsBytes(resizedBytes);
-    }
   }
 
   @override
@@ -167,7 +155,7 @@ class _EditTransactionScreenState extends State<EditTransactionScreen> {
                     'amount': double.tryParse(_amountController.text.trim()),
                     'description': _descriptionController.text.trim(),
                     'type': _selectedType,
-                    'categoryId': selectedCategoryId,
+                    'category': selectedCategoryId,
                   };
                   await DatabaseService.updateTransaction(updatedTransaction);
                   if (!mounted) return;

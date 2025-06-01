@@ -14,16 +14,741 @@ class HomeScreen extends StatefulWidget {
 }
 
 class HomeScreenState extends State<HomeScreen> {
+  int? selectedAccountId; // Добавлено: объявление переменной
+  List<model_account.Account> accounts = []; // Добавлено: объявление переменной
+
   @override
   Widget build(BuildContext context) {
-    return buildTransactionSummary(
-      context,
-    ); // Заменяем статический виджет на вызов метода
+    return Scaffold(
+      appBar: AppBar(title: const Text('Главная')),
+      body: SingleChildScrollView(
+        child: Material(
+          color: Theme.of(context).colorScheme.surface,
+          child: Column(
+            mainAxisSize:
+                MainAxisSize.min, // Добавлено для предотвращения переполнения
+            children: [
+              // --- Баланс и выбор счета ---
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<int?>(
+                        value:
+                            accounts.any(
+                                  (account) => account.id == selectedAccountId,
+                                )
+                                ? selectedAccountId
+                                : null,
+                        decoration: const InputDecoration(
+                          labelText: 'Счёт',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                        ),
+                        items: [
+                          const DropdownMenuItem(
+                            value: null,
+                            child: Text('Все'),
+                          ),
+                          ...accounts.map(
+                            (account) => DropdownMenuItem(
+                              value: account.id,
+                              child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(account.name),
+                                  IconButton(
+                                    icon: const Icon(Icons.edit, size: 18),
+                                    onPressed:
+                                        () => _openEditAccountScreen(
+                                          context,
+                                          account,
+                                        ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                        onChanged: (id) {
+                          setState(() {
+                            selectedAccountId = id;
+                          });
+                          _loadTransactions();
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    ElevatedButton.icon(
+                      onPressed: () => _openAddAccountScreen(context),
+                      icon: const Icon(Icons.add),
+                      label: const Text('Добавить счёт'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
+                        textStyle: const TextStyle(fontSize: 14),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // --- Фильтры ---
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: selectedPeriodFilter,
+                        decoration: const InputDecoration(
+                          labelText: 'Период',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: 'Все', child: Text('Все')),
+                          DropdownMenuItem(
+                            value: 'Сегодня',
+                            child: Text('Сегодня'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'Неделя',
+                            child: Text('Неделя'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'Месяц',
+                            child: Text('Месяц'),
+                          ),
+                          DropdownMenuItem(value: 'Год', child: Text('Год')),
+                          DropdownMenuItem(
+                            value: 'Произвольный период',
+                            child: Text('Произвольный период'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value == 'Произвольный период') {
+                            _selectCustomDateRange(context);
+                          } else {
+                            setState(() {
+                              selectedPeriodFilter = value!;
+                            });
+                            _loadTransactions();
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: DropdownButtonFormField<int?>(
+                        value:
+                            selectedCategoryFilter != null
+                                ? int.tryParse(
+                                  selectedCategoryFilter!,
+                                ) // Преобразуем строку в int
+                                : null,
+                        decoration: const InputDecoration(
+                          labelText: 'Категория',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                        ),
+                        items: [
+                          const DropdownMenuItem<int?>(
+                            value: null,
+                            child: Text('Все категории'),
+                          ),
+                          ...categories.map((category) {
+                            return DropdownMenuItem<int?>(
+                              value: category['id'], // Используем id категории
+                              child: Row(
+                                children: [
+                                  if (category['customIconPath'] != null &&
+                                      File(
+                                        category['customIconPath'],
+                                      ).existsSync())
+                                    Image.file(
+                                      File(category['customIconPath']),
+                                      width: 24,
+                                      height: 24,
+                                    )
+                                  else
+                                    Icon(
+                                      IconData(
+                                        category['icon'] ??
+                                            Icons.label.codePoint,
+                                        fontFamily: 'MaterialIcons',
+                                      ),
+                                    ),
+                                  const SizedBox(width: 8),
+                                  Text(category['name']),
+                                ],
+                              ),
+                            );
+                          }),
+                        ],
+                        onChanged: (value) {
+                          setState(() {
+                            selectedCategoryFilter =
+                                value?.toString(); // Сохраняем id как строку
+                          });
+                          _loadTransactions();
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    Text(
+                      'Выбранный период: ${_getPeriodFilterLabel()}',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                  ],
+                ),
+              ),
+              // --- Баланс выбранного счета или общий баланс ---
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.primary.withAlpha((0.07 * 255).round()),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Баланс', style: TextStyle(fontSize: 16)),
+                      const SizedBox(height: 4),
+                      Text(
+                        selectedAccountId == null
+                            ? _calculateTotalBalance() // Общий баланс для всех счетов
+                            : _calculateAccountBalance(selectedAccountId!),
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              // --- Список транзакций и итоги ---
+              Flexible(
+                fit: FlexFit.loose, // Изменено с Expanded на Flexible
+                child: Column(
+                  mainAxisSize:
+                      MainAxisSize
+                          .min, // Добавлено для предотвращения переполнения
+                  children: [
+                    Flexible(
+                      fit: FlexFit.loose, // Изменено с Expanded на Flexible
+                      child: ListView(
+                        shrinkWrap:
+                            true, // Добавлено для предотвращения переполнения
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        children:
+                            transactions
+                                .map(
+                                  (transaction) => TransactionCard(
+                                    id: transaction.id,
+                                    category: categories.firstWhere(
+                                      (category) =>
+                                          category['id'] ==
+                                          int.tryParse(transaction.category),
+                                      orElse:
+                                          () => {
+                                            'name': 'Неизвестно',
+                                            'customIconPath': null,
+                                            'icon': null,
+                                          },
+                                    ), // Передаем всю категорию как Map<String, dynamic>
+                                    title: transaction.title,
+                                    subtitle: transaction.subtitle,
+                                    amount:
+                                        '${transaction.amount > 0 ? '+' : ''}${transaction.amount} ₽',
+                                    color: transaction.color,
+                                    comment: transaction.comment,
+                                    onTap:
+                                        (context, card) =>
+                                            _openTransactionDetailsScreen(
+                                              context,
+                                              card,
+                                            ),
+                                  ),
+                                )
+                                .toList(), // Преобразуем Iterable в List
+                      ),
+                    ),
+                    // Итоги
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 18),
+                      decoration: BoxDecoration(
+                        color:
+                            Theme.of(context).colorScheme.surfaceContainerLow,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.primary.withAlpha((0.08 * 255).round()),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _SummaryColumn(
+                            title: 'Итого',
+                            value:
+                                '${transactions.fold<int>(0, (sum, t) => sum + t.amount)} ₽',
+                            valueColor:
+                                transactions.fold<int>(
+                                          0,
+                                          (sum, t) => sum + t.amount,
+                                        ) >=
+                                        0
+                                    ? Colors.green
+                                    : Colors.redAccent,
+                          ),
+                          _SummaryDivider(),
+                          _SummaryColumn(
+                            title: 'Доходы',
+                            value: '+$income ₽',
+                            valueColor: Colors.green,
+                          ),
+                          _SummaryDivider(),
+                          _SummaryColumn(
+                            title: 'Расходы',
+                            value: '$expense ₽',
+                            valueColor: Colors.redAccent,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
-  List<model_account.Account> accounts = [];
-  int selectedAccountIndex = 0;
-  int? selectedAccountId; // Добавлено: ID выбранного счета (null для "Все")
+  // Removed duplicate declaration of 'accounts' to avoid conflict
+  // Duplicate declaration removed
+  // Removed duplicate declaration of 'income' to avoid conflict
+
+  // Removed duplicate declaration of 'expense' to avoid conflict
+
+  // Удален список примеров транзакций
+  // Removed duplicate declaration of 'transactions' to avoid conflict
+
+  // Duplicate declaration removed
+  // Duplicate declaration removed
+
+  // Removed duplicate declaration of 'categories' to avoid conflict
+
+  // This method is already defined earlier. Removing this duplicate.
+
+  // Removed duplicate didChangeDependencies method to avoid conflict
+
+  // Removed duplicate _selectCustomDateRange declaration to resolve conflict
+
+  // Removed duplicate declaration of _getPeriodFilterLabel to avoid conflict
+
+  // Removed duplicate declaration of _formatDateTime to avoid conflict
+
+  bool areDatesSameDay(DateTime date1, DateTime date2) {
+    return date1.year == date2.year &&
+        date1.month == date2.month &&
+        date1.day == date2.day;
+  }
+
+  // Removed duplicate declaration of _loadCategories to avoid conflict
+
+  // Removed duplicate declaration of _openTransactionDetailsScreen to avoid conflict
+
+  // Removed duplicate declaration of _openAddAccountScreen to resolve conflict
+
+  // Универсальный fade route
+
+  // Добавлено: метод для обновления транзакций
+  // Removed duplicate declaration of 'updateTransactions' to avoid conflict
+
+  // Removed duplicate declaration of _calculateAccountBalance to resolve conflict
+
+  // Removed duplicate _calculateTotalBalance method to resolve conflict
+
+  Widget buildTransactionOverview(BuildContext context) {
+    // Сводка по транзакциям
+    final total = transactions.fold<int>(0, (sum, t) => sum + t.amount);
+    final income = transactions
+        .where((t) => t.amount > 0)
+        .fold<int>(0, (sum, t) => sum + t.amount);
+    final expense = transactions
+        .where((t) => t.amount < 0)
+        .fold<int>(0, (sum, t) => sum + t.amount);
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Главная')),
+      body: SingleChildScrollView(
+        // Добавлен для предотвращения переполнения
+        child: Material(
+          color: Theme.of(context).colorScheme.surface,
+          child: Column(
+            children: [
+              // --- Баланс и выбор счета ---
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<int?>(
+                        value:
+                            accounts.any(
+                                  (account) => account.id == selectedAccountId,
+                                )
+                                ? selectedAccountId
+                                : null,
+                        decoration: const InputDecoration(
+                          labelText: 'Счёт',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                        ),
+                        items: [
+                          const DropdownMenuItem(
+                            value: null,
+                            child: Text('Все'),
+                          ),
+                          ...accounts.map(
+                            (account) => DropdownMenuItem(
+                              value: account.id,
+                              child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(account.name),
+                                  IconButton(
+                                    icon: const Icon(Icons.edit, size: 18),
+                                    onPressed:
+                                        () => _openEditAccountScreen(
+                                          context,
+                                          account,
+                                        ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                        onChanged: (id) {
+                          setState(() {
+                            selectedAccountId = id;
+                          });
+                          _loadTransactions();
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    ElevatedButton.icon(
+                      onPressed: () => _openAddAccountScreen(context),
+                      icon: const Icon(Icons.add),
+                      label: const Text('Добавить счёт'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
+                        textStyle: const TextStyle(fontSize: 14),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // --- Фильтры ---
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: selectedPeriodFilter,
+                        decoration: const InputDecoration(
+                          labelText: 'Период',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: 'Все', child: Text('Все')),
+                          DropdownMenuItem(
+                            value: 'Сегодня',
+                            child: Text('Сегодня'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'Неделя',
+                            child: Text('Неделя'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'Месяц',
+                            child: Text('Месяц'),
+                          ),
+                          DropdownMenuItem(value: 'Год', child: Text('Год')),
+                          DropdownMenuItem(
+                            value: 'Произвольный период',
+                            child: Text('Произвольный период'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value == 'Произвольный период') {
+                            _selectCustomDateRange(context);
+                          } else {
+                            setState(() {
+                              selectedPeriodFilter = value!;
+                            });
+                            _loadTransactions();
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: DropdownButtonFormField<int?>(
+                        value:
+                            selectedCategoryFilter != null
+                                ? int.tryParse(
+                                  selectedCategoryFilter!,
+                                ) // Преобразуем строку в int
+                                : null,
+                        decoration: const InputDecoration(
+                          labelText: 'Категория',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                        ),
+                        items: [
+                          const DropdownMenuItem<int?>(
+                            value: null,
+                            child: Text('Все категории'),
+                          ),
+                          ...categories.map((category) {
+                            return DropdownMenuItem<int?>(
+                              value: category['id'], // Используем id категории
+                              child: Row(
+                                children: [
+                                  if (category['customIconPath'] != null &&
+                                      File(
+                                        category['customIconPath'],
+                                      ).existsSync())
+                                    Image.file(
+                                      File(category['customIconPath']),
+                                      width: 24,
+                                      height: 24,
+                                    )
+                                  else
+                                    Icon(
+                                      IconData(
+                                        category['icon'] ??
+                                            Icons.label.codePoint,
+                                        fontFamily: 'MaterialIcons',
+                                      ),
+                                    ),
+                                  const SizedBox(width: 8),
+                                  Text(category['name']),
+                                ],
+                              ),
+                            );
+                          }),
+                        ],
+                        onChanged: (value) {
+                          setState(() {
+                            selectedCategoryFilter =
+                                value?.toString(); // Сохраняем id как строку
+                          });
+                          _loadTransactions();
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    Text(
+                      'Выбранный период: ${_getPeriodFilterLabel()}',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                  ],
+                ),
+              ),
+              // --- Баланс выбранного счета или общий баланс ---
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.primary.withAlpha((0.07 * 255).round()),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Баланс', style: TextStyle(fontSize: 16)),
+                      const SizedBox(height: 4),
+                      Text(
+                        selectedAccountId == null
+                            ? _calculateTotalBalance() // Общий баланс для всех счетов
+                            : _calculateAccountBalance(selectedAccountId!),
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              // --- Список транзакций и итоги ---
+              Flexible(
+                fit: FlexFit.loose, // Изменено с Expanded на Flexible
+                child: Column(
+                  mainAxisSize:
+                      MainAxisSize
+                          .min, // Добавлено для предотвращения переполнения
+                  children: [
+                    Flexible(
+                      fit: FlexFit.loose, // Изменено с Expanded на Flexible
+                      child: ListView(
+                        shrinkWrap:
+                            true, // Добавлено для предотвращения переполнения
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        children:
+                            transactions
+                                .map(
+                                  (transaction) => TransactionCard(
+                                    id: transaction.id,
+                                    category: categories.firstWhere(
+                                      (category) =>
+                                          category['id'] ==
+                                          int.tryParse(transaction.category),
+                                      orElse:
+                                          () => {
+                                            'name': 'Неизвестно',
+                                            'customIconPath': null,
+                                            'icon': null,
+                                          },
+                                    ), // Передаем всю категорию как Map<String, dynamic>
+                                    title: transaction.title,
+                                    subtitle: transaction.subtitle,
+                                    amount:
+                                        '${transaction.amount > 0 ? '+' : ''}${transaction.amount} ₽',
+                                    color: transaction.color,
+                                    comment: transaction.comment,
+                                    onTap:
+                                        (context, card) =>
+                                            _openTransactionDetailsScreen(
+                                              context,
+                                              card,
+                                            ),
+                                  ),
+                                )
+                                .toList(), // Преобразуем Iterable в List
+                      ),
+                    ),
+                    // Итоги
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 18),
+                      decoration: BoxDecoration(
+                        color:
+                            Theme.of(context).colorScheme.surfaceContainerLow,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.primary.withAlpha((0.08 * 255).round()),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _SummaryColumn(
+                            title: 'Итого',
+                            value: '$total ₽',
+                            valueColor:
+                                total >= 0 ? Colors.green : Colors.redAccent,
+                          ),
+                          _SummaryDivider(),
+                          _SummaryColumn(
+                            title: 'Доходы',
+                            value: '+$income ₽',
+                            valueColor: Colors.green,
+                          ),
+                          _SummaryDivider(),
+                          _SummaryColumn(
+                            title: 'Расходы',
+                            value: '$expense ₽',
+                            valueColor: Colors.redAccent,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Removed duplicate declaration of 'accounts' to avoid conflict
+  // Duplicate declaration removed
+  int get income => transactions
+      .where((t) => t.amount > 0)
+      .fold<int>(0, (sum, t) => sum + t.amount); // Добавлено: расчет доходов
+
+  int get expense => transactions
+      .where((t) => t.amount < 0)
+      .fold<int>(0, (sum, t) => sum + t.amount); // Добавлено: расчет расходов
 
   // Удален список примеров транзакций
   final List<TransactionData> transactions = [];
@@ -37,7 +762,7 @@ class HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _loadAccounts();
+    _loadAccounts(); // Добавлено: загрузка счетов при инициализации
     _loadCategories(); // Загружаем категории из базы данных
     _loadTransactions();
   }
@@ -295,309 +1020,328 @@ class HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Главная')),
-      body: Material(
-        color: Theme.of(context).colorScheme.surface,
-        child: Column(
-          children: [
-            // --- Баланс и выбор счета ---
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: DropdownButtonFormField<int?>(
-                      value:
-                          accounts.any(
-                                (account) => account.id == selectedAccountId,
-                              )
-                              ? selectedAccountId
-                              : null,
-                      decoration: const InputDecoration(
-                        labelText: 'Счёт',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
-                      ),
-                      items: [
-                        const DropdownMenuItem(value: null, child: Text('Все')),
-                        ...accounts.map(
-                          (account) => DropdownMenuItem(
-                            value: account.id,
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(account.name),
-                                IconButton(
-                                  icon: const Icon(Icons.edit, size: 18),
-                                  onPressed:
-                                      () => _openEditAccountScreen(
-                                        context,
-                                        account,
-                                      ),
-                                ),
-                              ],
-                            ),
+      body: SingleChildScrollView(
+        // Добавлен для предотвращения переполнения
+        child: Material(
+          color: Theme.of(context).colorScheme.surface,
+          child: Column(
+            children: [
+              // --- Баланс и выбор счета ---
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<int?>(
+                        value:
+                            accounts.any(
+                                  (account) => account.id == selectedAccountId,
+                                )
+                                ? selectedAccountId
+                                : null,
+                        decoration: const InputDecoration(
+                          labelText: 'Счёт',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
                           ),
                         ),
-                      ],
-                      onChanged: (id) {
-                        setState(() {
-                          selectedAccountId = id;
-                        });
-                        _loadTransactions();
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  ElevatedButton.icon(
-                    onPressed: () => _openAddAccountScreen(context),
-                    icon: const Icon(Icons.add),
-                    label: const Text('Добавить счёт'),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 12,
-                      ),
-                      textStyle: const TextStyle(fontSize: 14),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            // --- Фильтры ---
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      value: selectedPeriodFilter,
-                      decoration: const InputDecoration(
-                        labelText: 'Период',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
-                      ),
-                      items: const [
-                        DropdownMenuItem(value: 'Все', child: Text('Все')),
-                        DropdownMenuItem(
-                          value: 'Сегодня',
-                          child: Text('Сегодня'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'Неделя',
-                          child: Text('Неделя'),
-                        ),
-                        DropdownMenuItem(value: 'Месяц', child: Text('Месяц')),
-                        DropdownMenuItem(value: 'Год', child: Text('Год')),
-                        DropdownMenuItem(
-                          value: 'Произвольный период',
-                          child: Text('Произвольный период'),
-                        ),
-                      ],
-                      onChanged: (value) {
-                        if (value == 'Произвольный период') {
-                          _selectCustomDateRange(context);
-                        } else {
+                        items: [
+                          const DropdownMenuItem(
+                            value: null,
+                            child: Text('Все'),
+                          ),
+                          ...accounts.map(
+                            (account) => DropdownMenuItem(
+                              value: account.id,
+                              child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(account.name),
+                                  IconButton(
+                                    icon: const Icon(Icons.edit, size: 18),
+                                    onPressed:
+                                        () => _openEditAccountScreen(
+                                          context,
+                                          account,
+                                        ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                        onChanged: (id) {
                           setState(() {
-                            selectedPeriodFilter = value!;
+                            selectedAccountId = id;
                           });
                           _loadTransactions();
-                        }
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: DropdownButtonFormField<int?>(
-                      value:
-                          selectedCategoryFilter != null
-                              ? int.tryParse(
-                                selectedCategoryFilter!,
-                              ) // Преобразуем строку в int
-                              : null,
-                      decoration: const InputDecoration(
-                        labelText: 'Категория',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
+                        },
                       ),
-                      items: [
-                        const DropdownMenuItem<int?>(
-                          value: null,
-                          child: Text('Все категории'),
-                        ),
-                        ...categories.map((category) {
-                          return DropdownMenuItem<int?>(
-                            value: category['id'], // Используем id категории
-                            child: Row(
-                              children: [
-                                if (category['customIconPath'] != null &&
-                                    File(
-                                      category['customIconPath'],
-                                    ).existsSync())
-                                  Image.file(
-                                    File(category['customIconPath']),
-                                    width: 24,
-                                    height: 24,
-                                  )
-                                else
-                                  Icon(
-                                    IconData(
-                                      category['icon'] ?? Icons.label.codePoint,
-                                      fontFamily: 'MaterialIcons',
-                                    ),
-                                  ),
-                                const SizedBox(width: 8),
-                                Text(category['name']),
-                              ],
-                            ),
-                          );
-                        }),
-                      ],
-                      onChanged: (value) {
-                        setState(() {
-                          selectedCategoryFilter =
-                              value?.toString(); // Сохраняем id как строку
-                        });
-                        _loadTransactions();
-                      },
                     ),
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
-                children: [
-                  Text(
-                    'Выбранный период: ${_getPeriodFilterLabel()}',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                ],
-              ),
-            ),
-            // --- Баланс выбранного счета или общий баланс ---
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.primary.withAlpha((0.07 * 255).round()),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Баланс', style: TextStyle(fontSize: 16)),
-                    const SizedBox(height: 4),
-                    Text(
-                      selectedAccountId == null
-                          ? _calculateTotalBalance() // Общий баланс для всех счетов
-                          : _calculateAccountBalance(selectedAccountId!),
-                      style: const TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
+                    const SizedBox(width: 12),
+                    ElevatedButton.icon(
+                      onPressed: () => _openAddAccountScreen(context),
+                      icon: const Icon(Icons.add),
+                      label: const Text('Добавить счёт'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
+                        textStyle: const TextStyle(fontSize: 14),
                       ),
                     ),
                   ],
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
-            // --- Список транзакций и итоги ---
-            Expanded(
-              child: Column(
-                children: [
-                  Expanded(
-                    child: ListView(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      children:
-                          transactions
-                              .map(
-                                (transaction) => TransactionCard(
-                                  id: transaction.id,
-                                  category: categories.firstWhere(
-                                    (category) =>
-                                        category['id'] ==
-                                        int.tryParse(transaction.category),
-                                    orElse:
-                                        () => {
-                                          'name': 'Неизвестно',
-                                          'customIconPath': null,
-                                          'icon': null,
-                                        },
-                                  ), // Передаем всю категорию как Map<String, dynamic>
-                                  title: transaction.title,
-                                  subtitle: transaction.subtitle,
-                                  amount:
-                                      '${transaction.amount > 0 ? '+' : ''}${transaction.amount} ₽',
-                                  color: transaction.color,
-                                  comment: transaction.comment,
-                                  onTap:
-                                      (context, card) =>
-                                          _openTransactionDetailsScreen(
-                                            context,
-                                            card,
-                                          ),
-                                ),
-                              )
-                              .toList(), // Преобразуем Iterable в List
-                    ),
-                  ),
-                  // Итоги
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 18),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.surfaceContainerLow,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.primary.withAlpha((0.08 * 255).round()),
+              // --- Фильтры ---
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: selectedPeriodFilter,
+                        decoration: const InputDecoration(
+                          labelText: 'Период',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: 'Все', child: Text('Все')),
+                          DropdownMenuItem(
+                            value: 'Сегодня',
+                            child: Text('Сегодня'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'Неделя',
+                            child: Text('Неделя'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'Месяц',
+                            child: Text('Месяц'),
+                          ),
+                          DropdownMenuItem(value: 'Год', child: Text('Год')),
+                          DropdownMenuItem(
+                            value: 'Произвольный период',
+                            child: Text('Произвольный период'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value == 'Произвольный период') {
+                            _selectCustomDateRange(context);
+                          } else {
+                            setState(() {
+                              selectedPeriodFilter = value!;
+                            });
+                            _loadTransactions();
+                          }
+                        },
                       ),
                     ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        _SummaryColumn(
-                          title: 'Итого',
-                          value: '$total ₽',
-                          valueColor:
-                              total >= 0 ? Colors.green : Colors.redAccent,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: DropdownButtonFormField<int?>(
+                        value:
+                            selectedCategoryFilter != null
+                                ? int.tryParse(
+                                  selectedCategoryFilter!,
+                                ) // Преобразуем строку в int
+                                : null,
+                        decoration: const InputDecoration(
+                          labelText: 'Категория',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
                         ),
-                        _SummaryDivider(),
-                        _SummaryColumn(
-                          title: 'Доходы',
-                          value: '+$income ₽',
-                          valueColor: Colors.green,
-                        ),
-                        _SummaryDivider(),
-                        _SummaryColumn(
-                          title: 'Расходы',
-                          value: '$expense ₽',
-                          valueColor: Colors.redAccent,
-                        ),
-                      ],
+                        items: [
+                          const DropdownMenuItem<int?>(
+                            value: null,
+                            child: Text('Все категории'),
+                          ),
+                          ...categories.map((category) {
+                            return DropdownMenuItem<int?>(
+                              value: category['id'], // Используем id категории
+                              child: Row(
+                                children: [
+                                  if (category['customIconPath'] != null &&
+                                      File(
+                                        category['customIconPath'],
+                                      ).existsSync())
+                                    Image.file(
+                                      File(category['customIconPath']),
+                                      width: 24,
+                                      height: 24,
+                                    )
+                                  else
+                                    Icon(
+                                      IconData(
+                                        category['icon'] ??
+                                            Icons.label.codePoint,
+                                        fontFamily: 'MaterialIcons',
+                                      ),
+                                    ),
+                                  const SizedBox(width: 8),
+                                  Text(category['name']),
+                                ],
+                              ),
+                            );
+                          }),
+                        ],
+                        onChanged: (value) {
+                          setState(() {
+                            selectedCategoryFilter =
+                                value?.toString(); // Сохраняем id как строку
+                          });
+                          _loadTransactions();
+                        },
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    Text(
+                      'Выбранный период: ${_getPeriodFilterLabel()}',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                  ],
+                ),
+              ),
+              // --- Баланс выбранного счета или общий баланс ---
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.primary.withAlpha((0.07 * 255).round()),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Баланс', style: TextStyle(fontSize: 16)),
+                      const SizedBox(height: 4),
+                      Text(
+                        selectedAccountId == null
+                            ? _calculateTotalBalance() // Общий баланс для всех счетов
+                            : _calculateAccountBalance(selectedAccountId!),
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              // --- Список транзакций и итоги ---
+              Flexible(
+                fit: FlexFit.loose, // Изменено с Expanded на Flexible
+                child: Column(
+                  mainAxisSize:
+                      MainAxisSize
+                          .min, // Добавлено для предотвращения переполнения
+                  children: [
+                    Flexible(
+                      fit: FlexFit.loose, // Изменено с Expanded на Flexible
+                      child: ListView(
+                        shrinkWrap:
+                            true, // Добавлено для предотвращения переполнения
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        children:
+                            transactions
+                                .map(
+                                  (transaction) => TransactionCard(
+                                    id: transaction.id,
+                                    category: categories.firstWhere(
+                                      (category) =>
+                                          category['id'] ==
+                                          int.tryParse(transaction.category),
+                                      orElse:
+                                          () => {
+                                            'name': 'Неизвестно',
+                                            'customIconPath': null,
+                                            'icon': null,
+                                          },
+                                    ), // Передаем всю категорию как Map<String, dynamic>
+                                    title: transaction.title,
+                                    subtitle: transaction.subtitle,
+                                    amount:
+                                        '${transaction.amount > 0 ? '+' : ''}${transaction.amount} ₽',
+                                    color: transaction.color,
+                                    comment: transaction.comment,
+                                    onTap:
+                                        (context, card) =>
+                                            _openTransactionDetailsScreen(
+                                              context,
+                                              card,
+                                            ),
+                                  ),
+                                )
+                                .toList(), // Преобразуем Iterable в List
+                      ),
+                    ),
+                    // Итоги
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 18),
+                      decoration: BoxDecoration(
+                        color:
+                            Theme.of(context).colorScheme.surfaceContainerLow,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.primary.withAlpha((0.08 * 255).round()),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _SummaryColumn(
+                            title: 'Итого',
+                            value: '$total ₽',
+                            valueColor:
+                                total >= 0 ? Colors.green : Colors.redAccent,
+                          ),
+                          _SummaryDivider(),
+                          _SummaryColumn(
+                            title: 'Доходы',
+                            value: '+$income ₽',
+                            valueColor: Colors.green,
+                          ),
+                          _SummaryDivider(),
+                          _SummaryColumn(
+                            title: 'Расходы',
+                            value: '$expense ₽',
+                            valueColor: Colors.redAccent,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

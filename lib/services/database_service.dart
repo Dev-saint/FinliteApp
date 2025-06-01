@@ -1,8 +1,6 @@
 import 'package:path/path.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-// Для форматирования даты
 import 'package:intl/date_symbol_data_local.dart';
-import 'package:logging/logging.dart';
 import 'package:flutter/material.dart';
 
 class DatabaseService {
@@ -24,67 +22,39 @@ class DatabaseService {
 
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, 'finlite.db');
+
     return await openDatabase(
       path,
-      version: 5, // Увеличиваем версию базы данных
+      version: 1,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE accounts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE transactions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT,
-            category TEXT,
-            amount INTEGER,
-            date TEXT,
-            comment TEXT,
-            type TEXT,
-            account_id INTEGER,
-            FOREIGN KEY (account_id) REFERENCES accounts (id)
+            name TEXT NOT NULL
           )
         ''');
         await db.execute('''
           CREATE TABLE categories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT,
-            type TEXT,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL,
             icon INTEGER,
-            customIconPath TEXT,
-            isDefault INTEGER DEFAULT 0
+            customIconPath TEXT
           )
         ''');
-      },
-      onUpgrade: (db, oldVersion, newVersion) async {
-        if (oldVersion < 5) {
-          // Добавляем столбец isDefault, если его нет
-          final tableInfo = await db.rawQuery('PRAGMA table_info(categories)');
-          final columnExists = tableInfo.any(
-            (column) => column['name'] == 'isDefault',
-          );
-          if (!columnExists) {
-            await db.execute(
-              'ALTER TABLE categories ADD COLUMN isDefault INTEGER DEFAULT 0',
-            );
-          }
-        }
-        if (oldVersion < 4) {
-          // Проверяем, существует ли столбец account_id
-          final tableInfo = await db.rawQuery(
-            'PRAGMA table_info(transactions)',
-          );
-          final columnExists = tableInfo.any(
-            (column) => column['name'] == 'account_id',
-          );
-          if (!columnExists) {
-            await db.execute(
-              'ALTER TABLE transactions ADD COLUMN account_id INTEGER',
-            );
-          }
-        }
+        await db.execute('''
+          CREATE TABLE transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            amount INTEGER NOT NULL,
+            type TEXT NOT NULL,
+            category_id INTEGER NOT NULL,
+            account_id INTEGER NOT NULL,
+            date TEXT NOT NULL,
+            description TEXT,
+            FOREIGN KEY (category_id) REFERENCES categories (id),
+            FOREIGN KEY (account_id) REFERENCES accounts (id)
+          )
+        ''');
       },
     );
   }
@@ -97,7 +67,7 @@ class DatabaseService {
 
   static Future<List<Map<String, dynamic>>> getAllAccounts() async {
     final db = await database;
-    return await db.query('accounts', orderBy: 'name ASC');
+    return await db.query('accounts');
   }
 
   static Future<int> updateAccount(Map<String, dynamic> data) async {
@@ -116,11 +86,9 @@ class DatabaseService {
   }
 
   static Future<void> printAllAccounts() async {
-    final db = await database;
-    final accounts = await db.query('accounts');
-    final logger = Logger('DatabaseService');
-    for (final account in accounts) {
-      logger.info('Account: $account');
+    final accounts = await getAllAccounts();
+    for (var account in accounts) {
+      print(account);
     }
   }
 
@@ -136,38 +104,18 @@ class DatabaseService {
 
   static Future<void> clearAccounts() async {
     final db = await database;
-    await db.delete('accounts'); // Удаляем все записи из таблицы счетов
+    await db.delete('accounts');
   }
 
   // --- Transactions ---
   static Future<int> insertTransaction(Map<String, dynamic> data) async {
     final db = await database;
-    return await db.insert(
-      'transactions',
-      {
-        ...data,
-        'account_id': data['account_id'], // Привязка к счету
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace, // Обновление при конфликте
-    );
+    return await db.insert('transactions', data);
   }
 
   static Future<List<Map<String, dynamic>>> getAllTransactions() async {
     final db = await database;
-    final transactions = await db.query('transactions', orderBy: 'date ASC');
-    return transactions.map((transaction) {
-      // Убедились, что id извлекается и передается
-      return {
-        ...transaction,
-        'id': transaction['id'], // Извлекаем id
-        'title': transaction['title'],
-        'category': transaction['category'],
-        'amount': transaction['amount'],
-        'date': transaction['date'],
-        'comment': transaction['comment'],
-        'type': transaction['type'],
-      };
-    }).toList();
+    return await db.query('transactions');
   }
 
   static Future<int> updateTransaction(Map<String, dynamic> data) async {
@@ -176,7 +124,7 @@ class DatabaseService {
       'transactions',
       data,
       where: 'id = ?',
-      whereArgs: [data['id']], // Убедились, что передается 'id' транзакции
+      whereArgs: [data['id']],
     );
   }
 
@@ -192,24 +140,18 @@ class DatabaseService {
 
   static Future<int> deleteTransaction(String id) async {
     final db = await database;
-    return await db.delete(
-      'transactions',
-      where: 'id = ?',
-      whereArgs: [id],
-    ); // Убедились, что удаление происходит по id
+    return await db.delete('transactions', where: 'id = ?', whereArgs: [id]);
   }
 
   static Future<void> clearTransactions() async {
     final db = await database;
-    await db.delete('transactions'); // Удаляем все записи из таблицы
+    await db.delete('transactions');
   }
 
   static Future<void> printAllTransactions() async {
-    final db = await database;
-    final transactions = await db.query('transactions');
-    final logger = Logger('DatabaseService');
-    for (final transaction in transactions) {
-      logger.info('Transaction: $transaction');
+    final transactions = await getAllTransactions();
+    for (var transaction in transactions) {
+      print(transaction);
     }
   }
 
@@ -218,25 +160,18 @@ class DatabaseService {
   ) async {
     final db = await database;
     if (accountId == null) {
-      // Если accountId равен null, возвращаем все транзакции
-      return await db.query('transactions', orderBy: 'date ASC');
+      return await db.query('transactions');
     }
-    // Возвращаем только транзакции с указанным account_id
     return await db.query(
       'transactions',
       where: 'account_id = ?',
       whereArgs: [accountId],
-      orderBy: 'date ASC',
     );
   }
 
   // --- Categories ---
   static Future<void> addCategory(Map<String, dynamic> category) async {
     final db = await database;
-    final exists = await categoryExists(category['name']);
-    if (exists) {
-      throw Exception('Категория с таким названием уже существует');
-    }
     await db.insert('categories', category);
   }
 
@@ -244,12 +179,7 @@ class DatabaseService {
     final db = await database;
     await db.update(
       'categories',
-      {
-        'name': category['name'],
-        'icon': category['icon'], // Сохраняем codePoint
-        'type': category['type'],
-        'customIconPath': category['customIconPath'],
-      },
+      category,
       where: 'id = ?',
       whereArgs: [category['id']],
     );
@@ -257,7 +187,7 @@ class DatabaseService {
 
   static Future<List<Map<String, dynamic>>> getAllCategories() async {
     final db = await database;
-    return await db.query('categories', orderBy: 'name ASC');
+    return await db.query('categories');
   }
 
   static Future<int> deleteCategory(int id) async {
@@ -266,11 +196,9 @@ class DatabaseService {
   }
 
   static Future<void> printAllCategories() async {
-    final db = await database;
-    final categories = await db.query('categories');
-    final logger = Logger('DatabaseService');
-    for (final category in categories) {
-      logger.info('Category: $category');
+    final categories = await getAllCategories();
+    for (var category in categories) {
+      print(category);
     }
   }
 
@@ -286,59 +214,28 @@ class DatabaseService {
 
   static Future<void> clearCategories() async {
     final db = await database;
-    await db.delete('categories'); // Удаляем все записи из таблицы категорий
+    await db.delete('categories');
   }
 
   static Future<void> ensureDefaultCategories() async {
+    final db = await database;
     final defaultCategories = [
       {
         'name': 'Продукты',
+        'type': 'расход',
         'icon': Icons.shopping_cart.codePoint,
-        'type': 'расход',
-        'customIconPath': null,
-        'isDefault': 1, // Сохраняем как INTEGER (1 для true)
-      },
-      {
-        'name': 'Транспорт',
-        'icon': Icons.directions_car.codePoint,
-        'type': 'расход',
-        'customIconPath': null,
-        'isDefault': 1,
-      },
-      {
-        'name': 'Развлечения',
-        'icon': Icons.movie.codePoint,
-        'type': 'расход',
-        'customIconPath': null,
-        'isDefault': 1,
       },
       {
         'name': 'Зарплата',
-        'icon': Icons.attach_money.codePoint,
         'type': 'доход',
-        'customIconPath': null,
-        'isDefault': 1,
+        'icon': Icons.attach_money.codePoint,
       },
     ];
 
-    final db = await database;
-
-    for (final category in defaultCategories) {
-      final existingCategory = await db.query(
-        'categories',
-        where: 'name = ?',
-        whereArgs: [category['name']],
-      );
-      if (existingCategory.isEmpty) {
+    for (var category in defaultCategories) {
+      final exists = await categoryExists(category['name']! as String);
+      if (!exists) {
         await db.insert('categories', category);
-      } else {
-        // Обновляем поле isDefault, если категория уже существует
-        await db.update(
-          'categories',
-          {'isDefault': 1},
-          where: 'name = ?',
-          whereArgs: [category['name']],
-        );
       }
     }
   }

@@ -1,7 +1,36 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // Для TextInputFormatter
 import 'package:intl/intl.dart';
 import '../services/database_service.dart';
+
+// Класс DateInputFormatter вынесен за пределы ReportsScreen
+class DateInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final text = newValue.text;
+
+    // Удаляем все символы, кроме цифр
+    final digitsOnly = text.replaceAll(RegExp(r'[^\d]'), '');
+
+    final buffer = StringBuffer();
+    for (int i = 0; i < digitsOnly.length; i++) {
+      if (i == 2 || i == 4) {
+        buffer.write('.'); // Добавляем разделитель
+      }
+      buffer.write(digitsOnly[i]);
+    }
+
+    final formatted = buffer.toString();
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
+    );
+  }
+}
 
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
@@ -19,6 +48,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
   List<Map<String, dynamic>> accounts = [];
   Map<String, Color> categoryColors = {};
   bool generatePressed = false;
+  int? touchedIndex;
+  int _touchedIncomeIndex = -1;
+  int _touchedExpenseIndex = -1;
 
   final List<String> reportTypes = [
     '📊 Расходы по категориям',
@@ -56,6 +88,37 @@ class _ReportsScreenState extends State<ReportsScreen> {
     });
   }
 
+  List<PieChartSectionData> buildSections(Map<String, int> data) {
+    final total = data.values.fold(0, (a, b) => a + b);
+    final List<Color> colors = [
+      Colors.blue,
+      Colors.green,
+      Colors.orange,
+      Colors.purple,
+      Colors.red,
+      Colors.teal,
+      Colors.indigo,
+    ];
+
+    int colorIndex = 0;
+
+    return data.entries.map((e) {
+      final color = colors[colorIndex++ % colors.length];
+      final percent =
+          total > 0 ? (e.value / total * 100).toStringAsFixed(1) : '0';
+      return PieChartSectionData(
+        color: color,
+        value: e.value.toDouble(),
+        title: '$percent%',
+        titleStyle: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+        ),
+        radius: 100,
+      );
+    }).toList();
+  }
+
   bool _isInSelectedPeriod(DateTime date) {
     final now = DateTime.now();
     switch (selectedPeriod) {
@@ -81,6 +144,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   Widget _buildReportChart() {
+    if (selectedPeriod == 'Произвольный период' && customDateRange == null) {
+      return const Center(
+        child: Text('Выберите произвольный период для отображения данных'),
+      );
+    }
+
     switch (selectedReportType) {
       case '📊 Расходы по категориям':
         return _buildPieChart(false);
@@ -106,6 +175,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
       return _isInSelectedPeriod(date) &&
           ((isIncome && amount > 0) || (!isIncome && amount < 0));
     });
+
+    if (filtered.isEmpty) {
+      return const Center(child: Text('Нет данных для отображения'));
+    }
 
     final Map<String, int> categoryTotals = {};
     for (var tx in filtered) {
@@ -159,10 +232,40 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 height: constraints.maxHeight * 0.7,
                 child: PieChart(
                   PieChartData(
-                    sections: sections,
+                    sections:
+                        sections.asMap().entries.map((entry) {
+                          final index = entry.key;
+                          final data = entry.value;
+                          final isTouched = touchedIndex == index;
+                          return data.copyWith(
+                            radius: isTouched ? 110 : 100,
+                            title:
+                                isTouched
+                                    ? '${data.value.toStringAsFixed(0)} ₽'
+                                    : data.title,
+                            titleStyle: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          );
+                        }).toList(),
+                    pieTouchData: PieTouchData(
+                      touchCallback: (event, response) {
+                        setState(() {
+                          if (!event.isInterestedForInteractions ||
+                              response == null ||
+                              response.touchedSection == null) {
+                            touchedIndex = null;
+                          } else {
+                            touchedIndex =
+                                response.touchedSection!.touchedSectionIndex;
+                          }
+                        });
+                      },
+                    ),
                     centerSpaceRadius: 40,
                     sectionsSpace: 2,
-                    pieTouchData: PieTouchData(enabled: true),
                   ),
                 ),
               ),
@@ -170,18 +273,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
               Wrap(
                 spacing: 12,
                 children:
-                    categoryColors.entries
-                        .map(
-                          (e) => Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Container(width: 12, height: 12, color: e.value),
-                              const SizedBox(width: 6),
-                              Text(e.key),
-                            ],
-                          ),
-                        )
-                        .toList(),
+                    categoryColors.entries.map((e) {
+                      return Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(width: 12, height: 12, color: e.value),
+                          const SizedBox(width: 6),
+                          Text(e.key),
+                        ],
+                      );
+                    }).toList(),
               ),
             ],
           ),
@@ -189,22 +290,30 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   Widget _buildAccountsPieChart() {
-    final Map<String, int> accountTotals = {};
+    final Map<String, int> incomeMap = {};
+    final Map<String, int> expenseMap = {};
+    final Map<String, Color> accountColors = {};
+
     for (var tx in transactions) {
-      final date = DateTime.tryParse(tx['date'] ?? '') ?? DateTime.now();
-      if (!_isInSelectedPeriod(date)) continue;
-      final accId = tx['accountId'];
+      final date = DateTime.tryParse(tx['date'] ?? '');
+      if (date == null || !_isInSelectedPeriod(date)) continue;
+
+      final accId = tx['account_id'];
       final account = accounts.firstWhere(
         (a) => a['id'] == accId,
         orElse: () => {'name': 'Неизвестно'},
       );
-      final name = account['name'];
-      accountTotals[name] =
-          (accountTotals[name] ?? 0) + (tx['amount'] as num).abs().toInt();
+      final name = account['name'] ?? 'Неизвестно';
+
+      final amount = tx['amount'] as num;
+      if (amount >= 0) {
+        incomeMap[name] = (incomeMap[name] ?? 0) + amount.toInt();
+      } else {
+        expenseMap[name] = (expenseMap[name] ?? 0) + amount.abs().toInt();
+      }
     }
 
-    final total = accountTotals.values.fold(0, (a, b) => a + b);
-    final List<Color> colors = [
+    List<Color> colors = [
       Colors.blue,
       Colors.green,
       Colors.orange,
@@ -213,21 +322,128 @@ class _ReportsScreenState extends State<ReportsScreen> {
       Colors.teal,
       Colors.indigo,
     ];
-    int colorIndex = 0;
 
-    final sections =
-        accountTotals.entries.map((e) {
-          final color = colors[colorIndex++ % colors.length];
-          return PieChartSectionData(
-            color: color,
-            value: e.value.toDouble(),
-            title: '${(e.value / total * 100).toStringAsFixed(1)}%',
-            radius: 100,
-          );
-        }).toList();
+    Widget buildPie(Map<String, int> data, bool isIncome) {
+      final total = data.values.fold(0, (a, b) => a + b);
+      final touchedIndex =
+          isIncome ? _touchedIncomeIndex : _touchedExpenseIndex;
 
-    return PieChart(
-      PieChartData(sections: sections, centerSpaceRadius: 40, sectionsSpace: 2),
+      int index = 0;
+      accountColors.clear();
+      final sections =
+          data.entries.map((e) {
+            final i = index++;
+            final color = colors[i % colors.length];
+            accountColors[e.key] = color;
+            final isTouched = i == touchedIndex;
+            return PieChartSectionData(
+              color: color,
+              value: e.value.toDouble(),
+              title:
+                  isTouched
+                      ? ''
+                      : '${(e.value / total * 100).toStringAsFixed(1)}%',
+              titleStyle: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+              radius: isTouched ? 100 : 85,
+              badgeWidget:
+                  isTouched
+                      ? Text(
+                        '${e.value} ₽',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      )
+                      : null,
+            );
+          }).toList();
+
+      return Column(
+        children: [
+          SizedBox(
+            width: 300,
+            height: 250,
+            child: PieChart(
+              PieChartData(
+                sections: sections,
+                centerSpaceRadius: 40,
+                sectionsSpace: 2,
+                pieTouchData: PieTouchData(
+                  touchCallback: (event, response) {
+                    setState(() {
+                      if (!event.isInterestedForInteractions ||
+                          response == null ||
+                          response.touchedSection == null) {
+                        if (isIncome) {
+                          _touchedIncomeIndex = -1;
+                        } else {
+                          _touchedExpenseIndex = -1;
+                        }
+                      } else {
+                        if (isIncome) {
+                          _touchedIncomeIndex =
+                              response.touchedSection!.touchedSectionIndex;
+                        } else {
+                          _touchedExpenseIndex =
+                              response.touchedSection!.touchedSectionIndex;
+                        }
+                      }
+                    });
+                  },
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 12,
+            children:
+                accountColors.entries.map((e) {
+                  return Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(width: 12, height: 12, color: e.value),
+                      const SizedBox(width: 6),
+                      Text(e.key),
+                    ],
+                  );
+                }).toList(),
+          ),
+        ],
+      );
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.only(top: 12),
+      child: Row(
+        children: [
+          Column(
+            children: [
+              const Text(
+                'Доходы',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 6),
+              buildPie(incomeMap, true),
+            ],
+          ),
+          const SizedBox(width: 36),
+          Column(
+            children: [
+              const Text(
+                'Расходы',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 6),
+              buildPie(expenseMap, false),
+            ],
+          ),
+        ],
+      ), //Если ты будешь менять эту строку, не меняй запятую на точку с запятой!!! И не стирай этот комментарий!!!
     );
   }
 
@@ -311,7 +527,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
     for (var tx in transactions) {
       final date = DateTime.tryParse(tx['date'] ?? '');
       if (date == null || !_isInSelectedPeriod(date)) continue;
-      final accId = tx['accountId'];
+      final accId = tx['account_id'];
       final account = accounts.firstWhere(
         (a) => a['id'] == accId,
         orElse: () => {'name': 'Неизвестно'},
@@ -328,7 +544,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
             barRods: [
               BarChartRodData(
                 toY: balances[e.value]!,
-                color: Colors.blue,
+                color: balances[e.value]! >= 0 ? Colors.green : Colors.red,
                 width: 12,
               ),
             ],
@@ -338,33 +554,100 @@ class _ReportsScreenState extends State<ReportsScreen> {
     return BarChart(
       BarChartData(
         barGroups: bars,
+        alignment: BarChartAlignment.spaceAround,
+        gridData: FlGridData(
+          show: true,
+          drawHorizontalLine: true,
+          getDrawingHorizontalLine: (value) {
+            if (value == 0) {
+              return FlLine(
+                color: Colors.black,
+                strokeWidth: 1,
+                dashArray: [5, 5],
+              );
+            }
+            return FlLine(color: Colors.grey, strokeWidth: 0.5);
+          },
+        ),
+        barTouchData: BarTouchData(
+          enabled: generatePressed,
+          touchTooltipData: BarTouchTooltipData(
+            tooltipBgColor: Colors.black87,
+            getTooltipItem: (group, groupIndex, rod, rodIndex) {
+              if (rod.toY == 0 || rod.toY.isNaN) {
+                return null; // Не показываем tooltip
+              }
+              return BarTooltipItem(
+                '${rod.toY.toStringAsFixed(0)} ₽',
+                const TextStyle(color: Colors.white),
+              );
+            },
+          ),
+        ),
         titlesData: FlTitlesData(
           bottomTitles: AxisTitles(
             sideTitles: SideTitles(
               showTitles: true,
-              getTitlesWidget: (value, _) {
+              getTitlesWidget: (value, meta) {
                 final index = value.toInt();
                 if (index < 0 || index >= labels.length) {
                   return const SizedBox();
                 }
-                return Text(
-                  labels[index],
-                  style: const TextStyle(fontSize: 10),
-                );
+                final balance = balances[labels[index]] ?? 0;
+                return balance < 0
+                    ? Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          labels[index],
+                          style: const TextStyle(fontSize: 10),
+                        ),
+                        const SizedBox(height: 4),
+                      ],
+                    )
+                    : Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(height: 4),
+                        Text(
+                          labels[index],
+                          style: const TextStyle(fontSize: 10),
+                        ),
+                      ],
+                    );
               },
             ),
           ),
           leftTitles: AxisTitles(
             sideTitles: SideTitles(
               showTitles: true,
-              getTitlesWidget:
-                  (value, _) => Text(
-                    '${value.toInt()}',
-                    style: const TextStyle(fontSize: 10),
-                  ),
+              reservedSize: 50,
+              getTitlesWidget: (value, _) {
+                return Text(
+                  '${value.toInt()}',
+                  style: const TextStyle(fontSize: 10),
+                  textAlign: TextAlign.right,
+                );
+              },
             ),
           ),
+          rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
         ),
+        borderData: FlBorderData(
+          show: true,
+          border: const Border(
+            left: BorderSide(color: Colors.black, width: 1),
+            bottom: BorderSide(color: Colors.black, width: 1),
+          ),
+        ),
+        baselineY: 0, // Устанавливаем ось X посередине
+        minY:
+            balances.values.reduce((a, b) => a < b ? a : b) -
+            10, // Добавляем отрицательные координаты
+        maxY:
+            balances.values.reduce((a, b) => a > b ? a : b) +
+            10, // Добавляем запас сверху
       ),
     );
   }
@@ -380,19 +663,26 @@ class _ReportsScreenState extends State<ReportsScreen> {
         orElse: () => {'name': 'Неизвестно'},
       );
       final name = category['name'];
-      totals[name] =
-          (totals[name] ?? 0) + (tx['amount'] as num).abs().toDouble();
+      totals[name] = (totals[name] ?? 0) + (tx['amount'] as num).toDouble();
+    }
+
+    if (totals.isEmpty) {
+      return const Center(child: Text('Нет данных для отображения'));
     }
 
     final labels = totals.keys.toList();
     final bars =
         labels.asMap().entries.map((e) {
+          final value = totals[e.value]!;
           return BarChartGroupData(
             x: e.key,
             barRods: [
               BarChartRodData(
-                toY: totals[e.value]!,
-                color: Colors.deepPurple,
+                toY: value.abs(), // Всегда вверх
+                color:
+                    value >= 0
+                        ? Colors.deepPurple
+                        : Colors.red, // Цвет зависит от значения
                 width: 12,
               ),
             ],
@@ -402,6 +692,24 @@ class _ReportsScreenState extends State<ReportsScreen> {
     return BarChart(
       BarChartData(
         barGroups: bars,
+        alignment: BarChartAlignment.spaceAround,
+        gridData: FlGridData(show: true, drawHorizontalLine: true),
+        barTouchData: BarTouchData(
+          enabled: generatePressed,
+          touchTooltipData: BarTouchTooltipData(
+            tooltipBgColor: Colors.black87,
+            getTooltipItem: (group, groupIndex, rod, rodIndex) {
+              if (rod.toY == 0 || rod.toY.isNaN) {
+                return null; // Не показываем tooltip
+              }
+              final originalValue = totals[labels[group.x.toInt()]]!;
+              return BarTooltipItem(
+                '${originalValue.toStringAsFixed(0)} ₽',
+                const TextStyle(color: Colors.white),
+              );
+            },
+          ),
+        ),
         titlesData: FlTitlesData(
           bottomTitles: AxisTitles(
             sideTitles: SideTitles(
@@ -421,29 +729,108 @@ class _ReportsScreenState extends State<ReportsScreen> {
           leftTitles: AxisTitles(
             sideTitles: SideTitles(
               showTitles: true,
-              getTitlesWidget:
-                  (value, _) => Text(
-                    '${value.toInt()}',
-                    style: const TextStyle(fontSize: 10),
-                  ),
+              reservedSize: 40,
+              getTitlesWidget: (value, _) {
+                return Text(
+                  '${value.toInt()}',
+                  style: const TextStyle(fontSize: 10),
+                  textAlign: TextAlign.right,
+                );
+              },
             ),
           ),
+          rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
         ),
+        borderData: FlBorderData(
+          show: true,
+          border: const Border(
+            left: BorderSide(color: Colors.black, width: 1),
+            bottom: BorderSide(color: Colors.black, width: 1),
+          ),
+        ),
+        minY: 0, // Минимальное значение Y всегда 0
       ),
     );
   }
 
   Future<void> _selectCustomDateRange() async {
-    final range = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime(2000),
-      lastDate: DateTime(2100),
-    );
-    if (range != null) {
-      setState(() {
-        customDateRange = range;
-      });
+    final startController = TextEditingController();
+    final endController = TextEditingController();
+
+    if (customDateRange != null) {
+      startController.text = DateFormat(
+        'dd.MM.yyyy',
+      ).format(customDateRange!.start);
+      endController.text = DateFormat(
+        'dd.MM.yyyy',
+      ).format(customDateRange!.end);
     }
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Выберите произвольный период'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: startController,
+                decoration: const InputDecoration(labelText: 'Начальная дата'),
+                inputFormatters: [DateInputFormatter()],
+                keyboardType: TextInputType.number,
+              ),
+              TextField(
+                controller: endController,
+                decoration: const InputDecoration(labelText: 'Конечная дата'),
+                inputFormatters: [DateInputFormatter()],
+                keyboardType: TextInputType.number,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Отмена'),
+            ),
+            TextButton(
+              onPressed: () {
+                try {
+                  final startDate = DateFormat(
+                    'dd.MM.yyyy',
+                  ).parse(startController.text);
+                  final endDate = DateFormat(
+                    'dd.MM.yyyy',
+                  ).parse(endController.text);
+
+                  if (startDate.isAfter(endDate)) {
+                    throw Exception(
+                      'Начальная дата не может быть позже конечной',
+                    );
+                  }
+
+                  setState(() {
+                    customDateRange = DateTimeRange(
+                      start: startDate,
+                      end: endDate,
+                    );
+                  });
+
+                  Navigator.of(context).pop();
+                } catch (e) {
+                  debugPrint('Ошибка при вводе дат: $e');
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Введите корректные даты')),
+                  );
+                }
+              },
+              child: const Text('Применить'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
