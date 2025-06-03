@@ -41,7 +41,10 @@ class CategoriesScreenState extends State<CategoriesScreen> {
   }
 
   Future<void> _initializeCategories() async {
-    await DatabaseService.ensureDefaultCategories(); // Убедиться, что предопределенные категории добавлены
+    final db = await DatabaseService.database;
+    await DatabaseService.ensureDefaultCategories(
+      db,
+    ); // Убедиться, что предопределенные категории добавлены
     final fetchedCategories =
         await DatabaseService.getAllCategories(); // Получаем категории из базы
     setState(() {

@@ -2,7 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:logging/logging.dart';
 import 'package:intl/intl.dart';
 import '../services/database_service.dart';
+import '../services/file_service.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:open_file/open_file.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'dart:io';
+import 'dart:io' show Platform, Process;
+import '../widgets/calculator_dialog.dart';
 
 // Temporary Account class definition (replace with your actual Account model or import)
 class Account {
@@ -14,7 +20,6 @@ class Account {
 
 class TransactionDetailsScreen extends StatefulWidget {
   final String id;
-  final Widget icon;
   final String title;
   final String subtitle;
   final String amount;
@@ -25,7 +30,6 @@ class TransactionDetailsScreen extends StatefulWidget {
   const TransactionDetailsScreen({
     super.key,
     required this.id,
-    required this.icon,
     required this.title,
     required this.subtitle,
     required this.amount,
@@ -39,6 +43,19 @@ class TransactionDetailsScreen extends StatefulWidget {
       _TransactionDetailsScreenState();
 }
 
+class _TransactionAttachment {
+  final int id;
+  final String fileName;
+  final String filePath;
+  final bool isImage;
+  _TransactionAttachment({
+    required this.id,
+    required this.fileName,
+    required this.filePath,
+    required this.isImage,
+  });
+}
+
 class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
   bool _isEditing = false;
   final _formKey = GlobalKey<FormState>();
@@ -49,11 +66,17 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
   late String _category;
   late Color _color;
   DateTime? _selectedDateTime;
-  late String _type = 'расход'; // Установлено значение по умолчанию
+  late String _type = 'расход';
   int? selectedAccountId;
-  List<Map<String, dynamic>> categories = []; // Список категорий из базы данных
+  List<Map<String, dynamic>> categories = [];
+  Map<String, dynamic>? _currentCategory;
 
   final List<Account> accounts = []; // Добавлено: список счетов
+  List<_TransactionAttachment> attachments = [];
+
+  // Добавляем контроллер для калькулятора
+  final TextEditingController _calculatorController = TextEditingController();
+  String _calculatorResult = '';
 
   @override
   void initState() {
@@ -71,12 +94,12 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
     _commentController = TextEditingController(text: widget.comment);
     _category = widget.category;
     _color = widget.color;
-    _type = _getCategoryType(_category); // Автоматическое подтягивание типа
+    _type = _getCategoryType(_category);
     _selectedDateTime = _tryParseDateTime(widget.subtitle);
 
-    // Загружаем список счетов и устанавливаем выбранный счет
     _loadAccounts();
-    _loadCategories(); // Загружаем категории из базы данных
+    _loadCategories();
+    _loadAttachments();
   }
 
   Future<void> _loadAccounts() async {
@@ -104,6 +127,31 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
     final fetchedCategories = await DatabaseService.getAllCategories();
     setState(() {
       categories = List<Map<String, dynamic>>.from(fetchedCategories);
+      // Находим текущую категорию
+      _currentCategory = categories.firstWhere(
+        (cat) => cat['name'] == _category,
+        orElse:
+            () => {'name': 'Неизвестно', 'icon': null, 'customIconPath': null},
+      );
+    });
+  }
+
+  Future<void> _loadAttachments() async {
+    final attachmentsData = await DatabaseService.getAttachmentsByTransaction(
+      int.parse(widget.id),
+    );
+    setState(() {
+      attachments =
+          attachmentsData
+              .map(
+                (att) => _TransactionAttachment(
+                  id: att['id'],
+                  fileName: att['file_name'],
+                  filePath: att['file_path'],
+                  isImage: FileService.isImage(att['file_path']),
+                ),
+              )
+              .toList();
     });
   }
 
@@ -165,10 +213,13 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
     _subtitleController.dispose();
     _amountController.dispose();
     _commentController.dispose();
+    _calculatorController.dispose();
     super.dispose();
   }
 
-  Widget _getCategoryIconWidget(Map<String, dynamic> category) {
+  Widget _getCategoryIconWidget(Map<String, dynamic>? category) {
+    if (category == null) return const Icon(Icons.label, size: 32);
+
     if (category['customIconPath'] != null &&
         File(category['customIconPath']).existsSync()) {
       return Image.file(
@@ -266,31 +317,162 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
     }
   }
 
+  // Удаляем неиспользуемые методы калькулятора
+  // Оставляем только форматирование суммы
+  String _formatAmountWithFixedDecimals(String value) {
+    if (value.isEmpty) return '0,00';
+    // Удаляем все нецифровые символы, кроме запятой
+    value = value.replaceAll(RegExp(r'[^\d,]'), '');
+    // Заменяем все запятые на одну
+    value = value.replaceAll(RegExp(r','), ',');
+    // Если запятых нет, добавляем в конец
+    if (!value.contains(',')) {
+      value = '$value,00';
+    } else {
+      // Разбиваем на целую и дробную части
+      final parts = value.split(',');
+      // Оставляем только первые две цифры после запятой
+      if (parts.length > 1) {
+        value = '${parts[0]},${parts[1].padRight(2, '0').substring(0, 2)}';
+      }
+    }
+    return value;
+  }
+
+  // Метод для вычисления результата калькулятора
+  void _calculateResult() {
+    try {
+      final expression = _calculatorController.text.replaceAll(',', '.');
+      // Используем безопасный способ вычисления выражения
+      final result = _evaluateExpression(expression);
+      setState(() {
+        _calculatorResult = result.toStringAsFixed(2).replaceAll('.', ',');
+      });
+    } catch (e) {
+      setState(() {
+        _calculatorResult = 'Ошибка';
+      });
+    }
+  }
+
+  // Безопасное вычисление выражения
+  double _evaluateExpression(String expression) {
+    // Удаляем все пробелы
+    expression = expression.replaceAll(' ', '');
+    // Проверяем на допустимые символы
+    if (!RegExp(r'^[\d+\-*/().]+$').hasMatch(expression)) {
+      throw Exception('Недопустимые символы в выражении');
+    }
+    // Вычисляем выражение
+    final result = _evaluate(expression);
+    if (result.isInfinite || result.isNaN) {
+      throw Exception('Некорректное выражение');
+    }
+    return result;
+  }
+
+  double _evaluate(String expression) {
+    // Простая реализация для базовых операций
+    // В реальном приложении лучше использовать готовую библиотеку
+    final terms = expression.split(RegExp(r'[+\-]'));
+    final operators =
+        expression
+            .split(RegExp(r'[^+\-]'))
+            .where((op) => op.isNotEmpty)
+            .toList();
+
+    double result = _evaluateTerm(terms[0]);
+    for (int i = 0; i < operators.length; i++) {
+      if (operators[i] == '+') {
+        result += _evaluateTerm(terms[i + 1]);
+      } else {
+        result -= _evaluateTerm(terms[i + 1]);
+      }
+    }
+    return result;
+  }
+
+  double _evaluateTerm(String term) {
+    final factors = term.split('*');
+    double result = 1;
+    for (final factor in factors) {
+      final divisions = factor.split('/');
+      double value = double.parse(divisions[0]);
+      for (int i = 1; i < divisions.length; i++) {
+        final divisor = double.parse(divisions[i]);
+        if (divisor == 0) throw Exception('Деление на ноль');
+        value /= divisor;
+      }
+      result *= value;
+    }
+    return result;
+  }
+
+  // Обновляем метод сохранения
   void _saveEdit() async {
     if (!mounted) return;
     if (_formKey.currentState?.validate() ?? false) {
-      final dateToSave =
-          _selectedDateTime ??
-          _tryParseDateTime(_subtitleController.text) ??
-          _tryParseDateTime(widget.subtitle);
+      try {
+        final dateToSave =
+            _selectedDateTime ??
+            _tryParseDateTime(_subtitleController.text) ??
+            _tryParseDateTime(widget.subtitle);
 
-      final updatedTransaction = {
-        'id': widget.id,
-        'title': _titleController.text,
-        'amount':
-            int.parse(_amountController.text) * (_type == 'расход' ? -1 : 1),
-        'type': _type,
-        'category': _category,
-        'date': dateToSave?.toIso8601String(),
-        'comment': _commentController.text,
-        'account_id':
-            selectedAccountId, // Проверяем, что selectedAccountId не null
-      };
+        final categoryId = _currentCategory?['id'];
+        if (categoryId == null) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Выберите категорию')));
+          return;
+        }
 
-      await DatabaseService.updateTransaction(updatedTransaction);
+        // Форматируем сумму перед сохранением
+        final formattedAmount = _formatAmountWithFixedDecimals(
+          _amountController.text,
+        );
+        _amountController.text = formattedAmount;
 
-      if (!mounted) return;
-      Navigator.pop(context, true); // Возвращаем true для обновления списка
+        // Корректно преобразуем сумму: '5003,54' -> 5003.54 (double)
+        final amount =
+            double.parse(formattedAmount.replaceAll(',', '.')) *
+            (_type == 'расход' ? -1 : 1);
+
+        final updatedTransaction = {
+          'id': widget.id,
+          'title': _titleController.text,
+          'amount': amount,
+          'type': _type,
+          'category_id': categoryId,
+          'date': dateToSave?.toIso8601String(),
+          'description': _commentController.text,
+          'account_id': selectedAccountId,
+        };
+
+        await DatabaseService.updateTransaction(updatedTransaction);
+        if (!mounted) return;
+
+        // Показываем сообщение об успехе
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Транзакция успешно сохранена'),
+            backgroundColor: Colors.green,
+          ),
+        );
+
+        // Возвращаемся на главный экран
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      } catch (e) {
+        Logger(
+          'TransactionDetailsScreen',
+        ).severe('Ошибка при сохранении транзакции: $e');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Ошибка при сохранении: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -329,21 +511,166 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
     }
   }
 
+  Future<void> _pickFiles() async {
+    final result = await FilePicker.platform.pickFiles(allowMultiple: true);
+    if (result != null) {
+      for (final file in result.files) {
+        if (file.path != null) {
+          final copiedPath = await FileService.copyToAttachments(
+            File(file.path!),
+          );
+          final attachmentId = await DatabaseService.insertAttachment({
+            'transaction_id': int.parse(widget.id),
+            'file_name': file.name,
+            'file_path': copiedPath,
+            'created_at': DateTime.now().toIso8601String(),
+          });
+          setState(() {
+            attachments.add(
+              _TransactionAttachment(
+                id: attachmentId,
+                fileName: file.name,
+                filePath: copiedPath,
+                isImage: FileService.isImage(copiedPath),
+              ),
+            );
+          });
+        }
+      }
+    }
+  }
+
+  Future<void> _removeAttachment(int index) async {
+    final attachment = attachments[index];
+    await DatabaseService.deleteAttachment(attachment.id);
+    await FileService.deleteFile(attachment.filePath);
+    setState(() {
+      attachments.removeAt(index);
+    });
+  }
+
+  Future<void> _openAttachment(_TransactionAttachment att) async {
+    try {
+      if (Platform.isWindows) {
+        // Для Windows используем Process.run для открытия файла
+        final result = await Process.run('cmd', [
+          '/c',
+          'start',
+          '',
+          att.filePath,
+        ]);
+        if (result.exitCode != 0) {
+          Logger(
+            'TransactionDetailsScreen',
+          ).warning('Ошибка при открытии файла через cmd: ${result.stderr}');
+          // Если не удалось открыть через cmd, пробуем через url_launcher
+          final uri = Uri.file(att.filePath);
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(uri);
+          } else {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Не удалось открыть файл. Проверьте, установлено ли приложение для работы с этим типом файлов.',
+                ),
+              ),
+            );
+          }
+        }
+      } else {
+        // Для других ОС используем OpenFile
+        final result = await OpenFile.open(att.filePath);
+        if (result.type != ResultType.done) {
+          // Если не удалось открыть через OpenFile, пробуем через url_launcher
+          final uri = Uri.file(att.filePath);
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(uri);
+          } else {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Не удалось открыть файл. Проверьте, установлено ли приложение для работы с этим типом файлов.',
+                ),
+              ),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      Logger(
+        'TransactionDetailsScreen',
+      ).warning('Ошибка при открытии файла: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Ошибка при открытии файла: $e')));
+    }
+  }
+
+  Future<void> _saveAttachmentTo(_TransactionAttachment att) async {
+    await FileService.saveFileWithDialog(att.filePath, att.fileName);
+  }
+
+  // Обновляем методы валидации для более информативных сообщений
+  String? _validateTitle(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Введите название операции';
+    }
+    if (value.length > 100) {
+      return 'Название не должно превышать 100 символов (сейчас: ${value.length})';
+    }
+    return null;
+  }
+
+  String? _validateAmount(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Введите сумму';
+    }
+    // Разрешаем только числа с максимум 2 знаками после запятой
+    final regex = RegExp(r'^\d+([.,]\d{0,2})?$');
+    if (!regex.hasMatch(value)) {
+      return 'Используйте формат: число с запятой и максимум 2 знаками после запятой (например: 1000,50)';
+    }
+    // Проверяем, что сумма не слишком большая
+    final amount = double.tryParse(value.replaceAll(',', '.'));
+    if (amount == null || amount <= 0) {
+      return 'Сумма должна быть больше нуля';
+    }
+    if (amount > 1000000000) {
+      // 1 миллиард
+      return 'Сумма не должна превышать 1 000 000 000 ₽';
+    }
+    return null;
+  }
+
+  String? _validateComment(String? value) {
+    if (value == null) return null;
+    if (value.length > 500) {
+      return 'Комментарий не должен превышать 500 символов (сейчас: ${value.length})';
+    }
+    return null;
+  }
+
+  // Метод форматирования суммы с валютой
+  String _formatAmount(String value) {
+    if (value.isEmpty) return '';
+    // Заменяем запятую на точку для корректного парсинга
+    final amount = double.tryParse(value.replaceAll(',', '.'));
+    if (amount == null) return value;
+    // Форматируем число с двумя знаками после запятой
+    return '${amount.toStringAsFixed(2)} ₽';
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final category = categories.firstWhere(
-      (cat) => cat['name'] == _category,
-      orElse:
-          () => {'name': 'Неизвестно', 'icon': null, 'customIconPath': null},
-    );
-
-    final iconWidget = _getCategoryIconWidget(category);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Детали операции'),
+        title: Text(_isEditing ? 'Редактирование операции' : 'Детали операции'),
         leading: IconButton(
           icon: Icon(_isEditing ? Icons.close : Icons.arrow_back),
           tooltip: _isEditing ? 'Отмена' : 'Назад',
@@ -351,6 +678,17 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
             if (_isEditing) {
               setState(() {
                 _isEditing = false;
+                // Восстанавливаем исходные значения при отмене редактирования
+                _category = widget.category;
+                _currentCategory = categories.firstWhere(
+                  (cat) => cat['name'] == _category,
+                  orElse:
+                      () => {
+                        'name': 'Неизвестно',
+                        'icon': null,
+                        'customIconPath': null,
+                      },
+                );
               });
             } else {
               Navigator.pop(context);
@@ -366,217 +704,387 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
             ),
         ],
       ),
-      body: Material(
-        color: colorScheme.surface,
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                iconWidget,
-                const SizedBox(height: 24),
-                _isEditing
-                    ? DropdownButtonFormField<String>(
-                      value: _type,
-                      decoration: const InputDecoration(labelText: 'Тип'),
-                      items: const [
-                        DropdownMenuItem(value: 'доход', child: Text('Доход')),
-                        DropdownMenuItem(
-                          value: 'расход',
-                          child: Text('Расход'),
+      body: Column(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    _getCategoryIconWidget(_currentCategory),
+                    const SizedBox(height: 24),
+                    _isEditing
+                        ? DropdownButtonFormField<String>(
+                          value: _type,
+                          decoration: const InputDecoration(labelText: 'Тип'),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'доход',
+                              child: Text('Доход'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'расход',
+                              child: Text('Расход'),
+                            ),
+                          ],
+                          onChanged: (value) {
+                            if (value != null) {
+                              setState(() {
+                                _type = value;
+                              });
+                            }
+                          },
+                        )
+                        : Text(
+                          'Тип: $_type',
+                          style: Theme.of(context).textTheme.bodyMedium,
                         ),
-                      ],
-                      onChanged: (value) {
-                        if (value != null) {
-                          setState(() {
-                            _type = value;
-                          });
-                        }
-                      },
-                    )
-                    : Text(
-                      'Тип: $_type',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                const SizedBox(height: 8),
-                _isEditing
-                    ? TextFormField(
-                      controller: _titleController,
-                      decoration: const InputDecoration(labelText: 'Название'),
-                      validator:
-                          (value) =>
-                              value == null || value.trim().isEmpty
-                                  ? 'Введите название'
-                                  : null,
-                    )
-                    : Text(
-                      _titleController.text,
-                      style: Theme.of(context).textTheme.headlineSmall,
-                    ),
-                const SizedBox(height: 8),
-                _isEditing
-                    ? GestureDetector(
-                      onTap: () => _pickDateTime(context),
-                      child: AbsorbPointer(
-                        child: TextFormField(
-                          controller: _subtitleController,
+                    const SizedBox(height: 8),
+                    _isEditing
+                        ? TextFormField(
+                          controller: _titleController,
                           decoration: const InputDecoration(
-                            labelText: 'Дата и время',
-                            suffixIcon: Icon(Icons.calendar_today),
+                            labelText: 'Название',
+                            hintText: 'Введите название операции',
                           ),
+                          validator: _validateTitle,
+                          maxLength: 100,
+                          textCapitalization: TextCapitalization.sentences,
+                          // Добавляем автофокус для подсветки ошибки при вводе
+                          autovalidateMode: AutovalidateMode.onUserInteraction,
+                        )
+                        : Text(
+                          _titleController.text,
+                          style: Theme.of(context).textTheme.headlineSmall,
+                        ),
+                    const SizedBox(height: 8),
+                    _isEditing
+                        ? GestureDetector(
+                          onTap: () => _pickDateTime(context),
+                          child: AbsorbPointer(
+                            child: TextFormField(
+                              controller: _subtitleController,
+                              decoration: const InputDecoration(
+                                labelText: 'Дата и время',
+                                suffixIcon: Icon(Icons.calendar_today),
+                              ),
+                              validator:
+                                  (value) =>
+                                      value == null || value.trim().isEmpty
+                                          ? 'Выберите дату и время'
+                                          : null,
+                            ),
+                          ),
+                        )
+                        : Text(
+                          _subtitleController.text,
+                          style: Theme.of(
+                            context,
+                          ).textTheme.bodyMedium?.copyWith(color: Colors.grey),
+                        ),
+                    const SizedBox(height: 8),
+                    _isEditing
+                        ? DropdownButtonFormField<int?>(
+                          value: _currentCategory?['id'],
+                          decoration: const InputDecoration(
+                            labelText: 'Категория',
+                          ),
+                          items:
+                              categories.map((category) {
+                                return DropdownMenuItem<int?>(
+                                  value: category['id'],
+                                  child: Row(
+                                    children: [
+                                      _getCategoryIconWidget(category),
+                                      const SizedBox(width: 8),
+                                      Text(category['name']),
+                                    ],
+                                  ),
+                                );
+                              }).toList(),
+                          onChanged: (value) {
+                            if (value != null) {
+                              final selectedCategory = categories.firstWhere(
+                                (cat) => cat['id'] == value,
+                                orElse:
+                                    () => {
+                                      'name': 'Неизвестно',
+                                      'icon': null,
+                                      'customIconPath': null,
+                                    },
+                              );
+                              setState(() {
+                                _currentCategory = selectedCategory;
+                                _category = selectedCategory['name'];
+                                _color = _getCategoryColor(_category);
+                                _updateTypeFromCategory(_category);
+                              });
+                            }
+                          },
                           validator:
                               (value) =>
-                                  value == null || value.trim().isEmpty
-                                      ? 'Выберите дату и время'
-                                      : null,
+                                  value == null ? 'Выберите категорию' : null,
+                        )
+                        : Text(
+                          'Категория: $_category',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                    const SizedBox(height: 8),
+                    if (_isEditing)
+                      DropdownButtonFormField<int?>(
+                        decoration: const InputDecoration(labelText: 'Счёт'),
+                        items:
+                            accounts
+                                .map(
+                                  (account) => DropdownMenuItem(
+                                    value: account.id,
+                                    child: Text(account.name),
+                                  ),
+                                )
+                                .toList(),
+                        value: selectedAccountId,
+                        onChanged: (value) {
+                          setState(() {
+                            selectedAccountId = value;
+                          });
+                        },
+                      )
+                    else
+                      Text(
+                        'Счёт: ${accounts.firstWhere((a) => a.id == selectedAccountId, orElse: () => Account(id: null, name: 'Неизвестно')).name}',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    const SizedBox(height: 24),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color:
+                            isDark
+                                ? colorScheme.surfaceContainerLow
+                                : colorScheme.primary.withAlpha(
+                                  (0.05 * 255).toInt(),
+                                ),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color:
+                              isDark
+                                  ? colorScheme.primary.withAlpha(
+                                    (0.25 * 255).toInt(),
+                                  )
+                                  : Colors.blueAccent.withAlpha(
+                                    (0.3 * 255).toInt(),
+                                  ),
                         ),
                       ),
-                    )
-                    : Text(
-                      _subtitleController.text,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.bodyMedium?.copyWith(color: Colors.grey),
-                    ),
-                const SizedBox(height: 8),
-                _isEditing
-                    ? DropdownButtonFormField<int?>(
-                      value: int.tryParse(
-                        _category,
-                      ), // Преобразуем строку в int
-                      decoration: const InputDecoration(labelText: 'Категория'),
-                      items:
-                          categories.map((category) {
-                            return DropdownMenuItem<int?>(
-                              value: category['id'],
-                              child: Row(
-                                children: [
-                                  _getCategoryIconWidget(category),
-                                  const SizedBox(width: 8),
-                                  Text(category['name']),
-                                ],
-                              ),
-                            );
-                          }).toList(),
-                      onChanged: (value) {
-                        if (value != null) {
-                          setState(() {
-                            _category =
-                                value.toString(); // Сохраняем id как строку
-                            _color = _getCategoryColor(_category);
-                            _updateTypeFromCategory(_category); // Обновляем тип
-                          });
-                        }
-                      },
-                      validator:
-                          (value) =>
-                              value == null ? 'Выберите категорию' : null,
-                    )
-                    : Text(
-                      'Категория: $_category',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                const SizedBox(height: 8),
-                if (_isEditing)
-                  DropdownButtonFormField<int?>(
-                    decoration: const InputDecoration(labelText: 'Счёт'),
-                    items:
-                        accounts
-                            .map(
-                              (account) => DropdownMenuItem(
-                                value: account.id,
-                                child: Text(account.name),
-                              ),
-                            )
-                            .toList(),
-                    value: selectedAccountId,
-                    onChanged: (value) {
-                      setState(() {
-                        selectedAccountId = value;
-                      });
-                    },
-                  )
-                else
-                  Text(
-                    'Счёт: ${accounts.firstWhere((a) => a.id == selectedAccountId, orElse: () => Account(id: null, name: 'Неизвестно')).name}',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                const SizedBox(height: 24),
-                _isEditing
-                    ? TextFormField(
-                      controller: _amountController,
-                      decoration: const InputDecoration(labelText: 'Сумма'),
-                      keyboardType: TextInputType.number,
-                      validator: (value) {
-                        if (value == null || value.trim().isEmpty) {
-                          return 'Введите сумму';
-                        }
-                        final num? parsed = num.tryParse(value);
-                        if (parsed == null) return 'Некорректная сумма';
-                        return null;
-                      },
-                    )
-                    : Text(
-                      widget.amount,
-                      style: TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
-                        color: _color,
-                      ),
-                    ),
-                const SizedBox(height: 24),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(16),
-                  margin: const EdgeInsets.only(bottom: 16),
-                  decoration: BoxDecoration(
-                    color:
-                        isDark
-                            ? colorScheme.surfaceContainerLow
-                            : colorScheme.primary.withAlpha(
-                              (0.05 * 255).toInt(),
-                            ),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color:
-                          isDark
-                              ? colorScheme.primary.withAlpha(
-                                (0.25 * 255).toInt(),
-                              )
-                              : Colors.blueAccent.withAlpha(
-                                (0.3 * 255).toInt(),
-                              ),
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Комментарий',
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 6),
-                      _isEditing
-                          ? TextFormField(
-                            controller: _commentController,
-                            decoration: const InputDecoration(
-                              labelText: 'Комментарий',
-                            ),
-                            maxLines: 2,
-                          )
-                          : Text(
-                            _commentController.text.isNotEmpty
-                                ? _commentController.text
-                                : 'Нет комментария',
-                            style: Theme.of(context).textTheme.bodyMedium,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Сумма',
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.bold),
                           ),
-                    ],
-                  ),
+                          const SizedBox(height: 6),
+                          _isEditing
+                              ? _buildAmountInput()
+                              : Text(
+                                _formatAmountWithFixedDecimals(
+                                  _amountController.text,
+                                ),
+                                style: TextStyle(
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.bold,
+                                  color: _color,
+                                ),
+                              ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color:
+                            isDark
+                                ? colorScheme.surfaceContainerLow
+                                : colorScheme.primary.withAlpha(
+                                  (0.05 * 255).toInt(),
+                                ),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color:
+                              isDark
+                                  ? colorScheme.primary.withAlpha(
+                                    (0.25 * 255).toInt(),
+                                  )
+                                  : Colors.blueAccent.withAlpha(
+                                    (0.3 * 255).toInt(),
+                                  ),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Комментарий',
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 6),
+                          _isEditing
+                              ? TextFormField(
+                                controller: _commentController,
+                                decoration: const InputDecoration(
+                                  border: InputBorder.none,
+                                  contentPadding: EdgeInsets.zero,
+                                  hintText: 'Введите комментарий',
+                                  errorStyle: TextStyle(color: Colors.red),
+                                ),
+                                maxLines: 3,
+                                maxLength: 500,
+                                validator: _validateComment,
+                                textCapitalization:
+                                    TextCapitalization.sentences,
+                                autovalidateMode:
+                                    AutovalidateMode.onUserInteraction,
+                              )
+                              : Text(
+                                _commentController.text.isNotEmpty
+                                    ? _commentController.text
+                                    : 'Нет комментария',
+                                style: Theme.of(context).textTheme.bodyMedium,
+                              ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color:
+                            isDark
+                                ? colorScheme.surfaceContainerLow
+                                : colorScheme.primary.withAlpha(
+                                  (0.05 * 255).toInt(),
+                                ),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color:
+                              isDark
+                                  ? colorScheme.primary.withAlpha(
+                                    (0.25 * 255).toInt(),
+                                  )
+                                  : Colors.blueAccent.withAlpha(
+                                    (0.3 * 255).toInt(),
+                                  ),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Файлы',
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(fontWeight: FontWeight.bold),
+                              ),
+                              if (_isEditing)
+                                ElevatedButton.icon(
+                                  onPressed: _pickFiles,
+                                  icon: const Icon(Icons.attach_file),
+                                  label: const Text('Прикрепить файл'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor:
+                                        colorScheme.primaryContainer,
+                                    foregroundColor:
+                                        colorScheme.onPrimaryContainer,
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          if (attachments.isNotEmpty)
+                            ListView.builder(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              itemCount: attachments.length,
+                              itemBuilder: (context, index) {
+                                final att = attachments[index];
+                                return Card(
+                                  child: ListTile(
+                                    leading:
+                                        att.isImage
+                                            ? Image.file(
+                                              File(att.filePath),
+                                              width: 40,
+                                              height: 40,
+                                              fit: BoxFit.cover,
+                                            )
+                                            : const Icon(
+                                              Icons.insert_drive_file,
+                                              size: 40,
+                                            ),
+                                    title: Text(att.fileName),
+                                    trailing: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        IconButton(
+                                          icon: const Icon(Icons.open_in_new),
+                                          tooltip: 'Открыть',
+                                          onPressed: () => _openAttachment(att),
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(Icons.download),
+                                          tooltip: 'Скачать',
+                                          onPressed:
+                                              () => _saveAttachmentTo(att),
+                                        ),
+                                        if (_isEditing)
+                                          IconButton(
+                                            icon: const Icon(Icons.delete),
+                                            tooltip: 'Удалить',
+                                            onPressed:
+                                                () => _removeAttachment(index),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          if (attachments.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                vertical: 8.0,
+                              ),
+                              child: Text(
+                                'Нет прикрепленных файлов',
+                                style: Theme.of(context).textTheme.bodyMedium
+                                    ?.copyWith(color: Colors.grey),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                  ],
                 ),
-                const Spacer(),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+            child: Column(
+              children: [
                 if (!_isEditing)
                   SizedBox(
                     width: double.infinity,
@@ -624,8 +1132,58 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
               ],
             ),
           ),
-        ),
+        ],
       ),
+    );
+  }
+
+  // Обновляем метод построения поля ввода суммы
+  Widget _buildAmountInput() {
+    return TextFormField(
+      controller: _amountController,
+      decoration: InputDecoration(
+        labelText: 'Сумма',
+        hintText: '0,00',
+        suffixText: '₽',
+        prefixIcon: const Icon(Icons.attach_money),
+        suffixIcon: IconButton(
+          icon: const Icon(Icons.calculate),
+          onPressed: () async {
+            final result = await showDialog<String>(
+              context: context,
+              builder:
+                  (context) => CalculatorDialog(
+                    initialValue: _amountController.text,
+                    onResult: (value) {
+                      _amountController.text = value;
+                    },
+                  ),
+            );
+            if (result != null) {
+              setState(() {
+                _amountController.text = result;
+              });
+            }
+          },
+        ),
+        errorStyle: const TextStyle(color: Colors.red),
+      ),
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      validator: _validateAmount,
+      autovalidateMode: AutovalidateMode.onUserInteraction,
+      onChanged: (value) {
+        // Форматируем ввод с фиксированным форматом
+        final formatted = _formatAmountWithFixedDecimals(value);
+        if (formatted != value) {
+          final cursorPos = _amountController.selection.baseOffset;
+          _amountController.text = formatted;
+          if (cursorPos != -1) {
+            _amountController.selection = TextSelection.fromPosition(
+              TextPosition(offset: cursorPos),
+            );
+          }
+        }
+      },
     );
   }
 }

@@ -290,8 +290,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   Widget _buildAccountsPieChart() {
-    final Map<String, int> incomeMap = {};
-    final Map<String, int> expenseMap = {};
+    final Map<String, int> incomeMap = {}, expenseMap = {};
     final Map<String, Color> accountColors = {};
 
     for (var tx in transactions) {
@@ -482,43 +481,84 @@ class _ReportsScreenState extends State<ReportsScreen> {
       );
     }
 
-    return BarChart(
-      BarChartData(
-        barGroups: bars,
-        titlesData: FlTitlesData(
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              getTitlesWidget: (value, _) {
-                final index = value.toInt();
-                if (index < 0 || index >= allDates.length) {
-                  return const SizedBox();
+    // Если дат много, делаем горизонтальный скролл
+    final chartWidth = allDates.length > 7 ? allDates.length * 60.0 : null;
+
+    final chart = SizedBox(
+      width: chartWidth,
+      child: BarChart(
+        BarChartData(
+          barGroups: bars,
+          titlesData: FlTitlesData(
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                getTitlesWidget: (value, _) {
+                  final index = value.toInt();
+                  if (index < 0 || index >= allDates.length) {
+                    return const SizedBox();
+                  }
+                  return FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      allDates[index],
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      softWrap: false,
+                    ),
+                  );
+                },
+              ),
+            ),
+            leftTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 40,
+                getTitlesWidget:
+                    (value, _) => Text(
+                      formatShortNumber(value.toDouble()),
+                      style: const TextStyle(fontSize: 14),
+                    ),
+              ),
+            ),
+            rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          ),
+          barTouchData: BarTouchData(
+            enabled: generatePressed,
+            touchTooltipData: BarTouchTooltipData(
+              tooltipBgColor: Colors.black87,
+              getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                if (rod.toY == 0 || rod.toY.isNaN) {
+                  return null;
                 }
-                return Padding(
-                  padding: const EdgeInsets.only(top: 8.0),
-                  child: Text(
-                    allDates[index],
-                    style: const TextStyle(fontSize: 10),
+                final isIncome = rod.color == Colors.green;
+                final sign = isIncome ? '+' : '-';
+                return BarTooltipItem(
+                  '$sign${rod.toY.abs().toStringAsFixed(0)} ₽',
+                  const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
                   ),
                 );
               },
             ),
           ),
-          leftTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 40,
-              getTitlesWidget:
-                  (value, _) => Text(
-                    '${value.toInt()}',
-                    style: const TextStyle(fontSize: 10),
-                  ),
-            ),
-          ),
-          rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
         ),
       ),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 32),
+      child:
+          allDates.length > 7
+              ? SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: chart,
+              )
+              : chart,
     );
   }
 
@@ -575,12 +615,26 @@ class _ReportsScreenState extends State<ReportsScreen> {
             tooltipBgColor: Colors.black87,
             getTooltipItem: (group, groupIndex, rod, rodIndex) {
               if (rod.toY == 0 || rod.toY.isNaN) {
-                return null; // Не показываем tooltip
+                return null;
               }
-              return BarTooltipItem(
-                '${rod.toY.toStringAsFixed(0)} ₽',
-                const TextStyle(color: Colors.white),
-              );
+              // Только минус для отрицательных значений, для положительных знак не нужен
+              if (rod.toY < 0) {
+                return BarTooltipItem(
+                  '-${rod.toY.abs().toStringAsFixed(0)} ₽',
+                  const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                );
+              } else {
+                return BarTooltipItem(
+                  '${rod.toY.abs().toStringAsFixed(0)} ₽',
+                  const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                );
+              }
             },
           ),
         ),
@@ -593,28 +647,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 if (index < 0 || index >= labels.length) {
                   return const SizedBox();
                 }
-                final balance = balances[labels[index]] ?? 0;
-                return balance < 0
-                    ? Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          labels[index],
-                          style: const TextStyle(fontSize: 10),
-                        ),
-                        const SizedBox(height: 4),
-                      ],
-                    )
-                    : Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const SizedBox(height: 4),
-                        Text(
-                          labels[index],
-                          style: const TextStyle(fontSize: 10),
-                        ),
-                      ],
-                    );
+                return Text(
+                  labels[index],
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                );
               },
             ),
           ),
@@ -624,8 +665,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
               reservedSize: 50,
               getTitlesWidget: (value, _) {
                 return Text(
-                  '${value.toInt()}',
-                  style: const TextStyle(fontSize: 10),
+                  formatShortNumber(value.toDouble()),
+                  style: const TextStyle(fontSize: 14),
                   textAlign: TextAlign.right,
                 );
               },
@@ -703,9 +744,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 return null; // Не показываем tooltip
               }
               final originalValue = totals[labels[group.x.toInt()]]!;
+              final isIncome = originalValue >= 0;
+              final sign = isIncome ? '+' : '-';
               return BarTooltipItem(
-                '${originalValue.toStringAsFixed(0)} ₽',
-                const TextStyle(color: Colors.white),
+                '$sign${originalValue.abs().toStringAsFixed(0)} ₽',
+                const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
               );
             },
           ),
@@ -721,7 +767,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 }
                 return Text(
                   labels[index],
-                  style: const TextStyle(fontSize: 10),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
                 );
               },
             ),
@@ -732,8 +783,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
               reservedSize: 40,
               getTitlesWidget: (value, _) {
                 return Text(
-                  '${value.toInt()}',
-                  style: const TextStyle(fontSize: 10),
+                  formatShortNumber(value.toDouble()),
+                  style: const TextStyle(fontSize: 14),
                   textAlign: TextAlign.right,
                 );
               },
@@ -919,5 +970,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
         ),
       ),
     );
+  }
+}
+
+// Функция для сокращения больших чисел (например, 3000000 -> 3kk)
+String formatShortNumber(num value) {
+  if (value.abs() >= 1000000) {
+    return '${(value / 1000000).toStringAsFixed(value % 1000000 == 0 ? 0 : 1)}kk';
+  } else if (value.abs() >= 1000) {
+    return '${(value / 1000).toStringAsFixed(value % 1000 == 0 ? 0 : 1)}k';
+  } else {
+    return value.toStringAsFixed(0);
   }
 }

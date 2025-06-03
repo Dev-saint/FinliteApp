@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart'; // Убедились, что импорт корректен
 import 'package:provider/provider.dart';
-import 'package:animations/animations.dart';
 import 'screens/home_screen.dart';
 import 'screens/categories_screen.dart';
 import 'screens/reports_screen.dart';
@@ -104,7 +103,7 @@ class _MainNavigationState extends State<MainNavigation> {
       PageRouteBuilder(
         pageBuilder:
             (context, animation, secondaryAnimation) =>
-                const AddTransactionScreen(), // Убедились, что AddTransactionScreen доступен
+                const AddTransactionScreen(),
         transitionsBuilder:
             (context, animation, secondaryAnimation, child) =>
                 FadeTransition(opacity: animation, child: child),
@@ -134,17 +133,21 @@ class _MainNavigationState extends State<MainNavigation> {
     final navFg = Theme.of(context).colorScheme.onPrimary;
 
     return Scaffold(
-      /* body: IndexedStack(
-        index: _selectedIndex,
-        children:
-            _screens, // Используем IndexedStack для сохранения состояния экранов
-      ), */
-      body: PageTransitionSwitcher(
-        duration: const Duration(milliseconds: 300),
-        transitionBuilder:
-            (child, animation, secondaryAnimation) =>
-                FadeTransition(opacity: animation, child: child),
-        child: _screens[_selectedIndex],
+      body: Stack(
+        children: List.generate(_screens.length, (index) {
+          return AnimatedOpacity(
+            opacity: _selectedIndex == index ? 1.0 : 0.0,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            child: Visibility(
+              visible: _selectedIndex == index,
+              maintainState: true,
+              maintainAnimation: true,
+              maintainSize: true,
+              child: _screens[index],
+            ),
+          );
+        }),
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,

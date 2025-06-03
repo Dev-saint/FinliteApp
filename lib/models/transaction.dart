@@ -1,6 +1,6 @@
 class TransactionModel {
   final int? id;
-  final int amount;
+  final double amount;
   final String type; // 'доход' или 'расход'
   final int categoryId;
   final int accountId; // Поле для привязки к счету
@@ -32,7 +32,10 @@ class TransactionModel {
   factory TransactionModel.fromMap(Map<String, dynamic> map) {
     return TransactionModel(
       id: map['id'] as int?,
-      amount: map['amount'] as int,
+      amount:
+          (map['amount'] is int)
+              ? (map['amount'] as int).toDouble()
+              : (map['amount'] as double? ?? 0),
       type: map['type'] as String,
       categoryId: map['category_id'] as int,
       accountId: map['account_id'] as int, // Привязка к счету

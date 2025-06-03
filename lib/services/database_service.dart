@@ -25,12 +25,13 @@ class DatabaseService {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 4,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE accounts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL
+            name TEXT NOT NULL,
+            balance REAL NOT NULL DEFAULT 0
           )
         ''');
         await db.execute('''
@@ -39,13 +40,15 @@ class DatabaseService {
             name TEXT NOT NULL,
             type TEXT NOT NULL,
             icon INTEGER,
-            customIconPath TEXT
+            customIconPath TEXT,
+            isDefault INTEGER NOT NULL DEFAULT 0
           )
         ''');
         await db.execute('''
           CREATE TABLE transactions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            amount INTEGER NOT NULL,
+            title TEXT,
+            amount REAL NOT NULL,
             type TEXT NOT NULL,
             category_id INTEGER NOT NULL,
             account_id INTEGER NOT NULL,
@@ -55,6 +58,98 @@ class DatabaseService {
             FOREIGN KEY (account_id) REFERENCES accounts (id)
           )
         ''');
+        await db.execute('''
+          CREATE TABLE transaction_attachments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            transaction_id INTEGER NOT NULL,
+            file_name TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (transaction_id) REFERENCES transactions (id)
+          )
+        ''');
+        await ensureDefaultCategories(db);
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute('''
+            CREATE TABLE transaction_attachments (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              transaction_id INTEGER NOT NULL,
+              file_name TEXT NOT NULL,
+              file_path TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY (transaction_id) REFERENCES transactions (id)
+            )
+          ''');
+        }
+        if (oldVersion < 3) {
+          // Добавляем поле balance в accounts
+          await db.execute(
+            'ALTER TABLE accounts ADD COLUMN balance REAL NOT NULL DEFAULT 0',
+          );
+          // Меняем тип amount в transactions на REAL
+          // SQLite не поддерживает ALTER COLUMN, поэтому создаём новую таблицу и копируем данные
+          await db.execute(
+            'ALTER TABLE transactions RENAME TO transactions_old',
+          );
+          await db.execute('''
+            CREATE TABLE transactions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              title TEXT,
+              amount REAL NOT NULL,
+              type TEXT NOT NULL,
+              category_id INTEGER NOT NULL,
+              account_id INTEGER NOT NULL,
+              date TEXT NOT NULL,
+              description TEXT,
+              FOREIGN KEY (category_id) REFERENCES categories (id),
+              FOREIGN KEY (account_id) REFERENCES accounts (id)
+            )
+          ''');
+          await db.execute('''
+            INSERT INTO transactions (id, amount, type, category_id, account_id, date, description, title)
+            SELECT id, amount * 1.0, type, category AS category_id, account_id, date, comment AS description, 
+              CASE WHEN instr(GROUP_CONCAT(name), 'title') > 0 THEN title ELSE '' END as title
+            FROM transactions_old
+          ''');
+          await db.execute('DROP TABLE transactions_old');
+          // Пересчитываем балансы для всех счетов
+          final accounts = await db.query('accounts');
+          for (final account in accounts) {
+            final accountId = account['id'] as int;
+            final result = await db.rawQuery(
+              'SELECT SUM(amount) as total FROM transactions WHERE account_id = ?',
+              [accountId],
+            );
+            final total = result.first['total'] ?? 0.0;
+            await db.update(
+              'accounts',
+              {'balance': total},
+              where: 'id = ?',
+              whereArgs: [accountId],
+            );
+          }
+        }
+        if (oldVersion < 4) {
+          // Добавляем поле title в transactions, если его нет
+          await db.execute('ALTER TABLE transactions ADD COLUMN title TEXT');
+        }
+        // Гарантируем, что поле title есть в старой таблице
+        try {
+          await db.execute(
+            'ALTER TABLE transactions_old ADD COLUMN title TEXT DEFAULT ""',
+          );
+        } catch (e) {
+          // Если поле уже есть, игнорируем ошибку
+        }
+        if (oldVersion < 5) {
+          // Добавляем поле isDefault в categories, если его нет
+          await db.execute(
+            'ALTER TABLE categories ADD COLUMN isDefault INTEGER NOT NULL DEFAULT 0',
+          );
+        }
+        await ensureDefaultCategories(db);
       },
     );
   }
@@ -108,9 +203,28 @@ class DatabaseService {
   }
 
   // --- Transactions ---
+  static Future<void> _recalculateAccountBalance(int accountId) async {
+    final db = await database;
+    final result = await db.rawQuery(
+      'SELECT SUM(amount) as total FROM transactions WHERE account_id = ?',
+      [accountId],
+    );
+    final total = result.first['total'] ?? 0.0;
+    await db.update(
+      'accounts',
+      {'balance': total},
+      where: 'id = ?',
+      whereArgs: [accountId],
+    );
+  }
+
   static Future<int> insertTransaction(Map<String, dynamic> data) async {
     final db = await database;
-    return await db.insert('transactions', data);
+    final id = await db.insert('transactions', data);
+    if (data['account_id'] != null) {
+      await _recalculateAccountBalance(data['account_id'] as int);
+    }
+    return id;
   }
 
   static Future<List<Map<String, dynamic>>> getAllTransactions() async {
@@ -120,12 +234,16 @@ class DatabaseService {
 
   static Future<int> updateTransaction(Map<String, dynamic> data) async {
     final db = await database;
-    return await db.update(
+    final result = await db.update(
       'transactions',
       data,
       where: 'id = ?',
       whereArgs: [data['id']],
     );
+    if (data['account_id'] != null) {
+      await _recalculateAccountBalance(data['account_id'] as int);
+    }
+    return result;
   }
 
   static Future<Map<String, dynamic>?> getTransactionById(String id) async {
@@ -140,7 +258,25 @@ class DatabaseService {
 
   static Future<int> deleteTransaction(String id) async {
     final db = await database;
-    return await db.delete('transactions', where: 'id = ?', whereArgs: [id]);
+    // Получаем account_id перед удалением
+    final transaction = await db.query(
+      'transactions',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    int? accountId;
+    if (transaction.isNotEmpty) {
+      accountId = transaction.first['account_id'] as int?;
+    }
+    final result = await db.delete(
+      'transactions',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    if (accountId != null) {
+      await _recalculateAccountBalance(accountId);
+    }
+    return result;
   }
 
   static Future<void> clearTransactions() async {
@@ -217,24 +353,66 @@ class DatabaseService {
     await db.delete('categories');
   }
 
-  static Future<void> ensureDefaultCategories() async {
-    final db = await database;
+  static Future<void> ensureDefaultCategories(Database db) async {
     final defaultCategories = [
       {
         'name': 'Продукты',
         'type': 'расход',
         'icon': Icons.shopping_cart.codePoint,
+        'isDefault': 1,
       },
       {
         'name': 'Зарплата',
         'type': 'доход',
         'icon': Icons.attach_money.codePoint,
+        'isDefault': 1,
       },
+      {
+        'name': 'Транспорт',
+        'type': 'расход',
+        'icon': Icons.directions_car.codePoint,
+        'isDefault': 1,
+      },
+      {
+        'name': 'Развлечения',
+        'type': 'расход',
+        'icon': Icons.movie.codePoint,
+        'isDefault': 1,
+      },
+      {
+        'name': 'Подарки',
+        'type': 'расход',
+        'icon': Icons.card_giftcard.codePoint,
+        'isDefault': 1,
+      },
+      {
+        'name': 'Здоровье',
+        'type': 'расход',
+        'icon': Icons.healing.codePoint,
+        'isDefault': 1,
+      },
+      {
+        'name': 'Кафе и рестораны',
+        'type': 'расход',
+        'icon': Icons.restaurant.codePoint,
+        'isDefault': 1,
+      },
+      {
+        'name': 'Инвестиции',
+        'type': 'доход',
+        'icon': Icons.trending_up.codePoint,
+        'isDefault': 1,
+      },
+      // ... добавьте остальные нужные категории
     ];
 
     for (var category in defaultCategories) {
-      final exists = await categoryExists(category['name']! as String);
-      if (!exists) {
+      final result = await db.query(
+        'categories',
+        where: 'name = ?',
+        whereArgs: [category['name']],
+      );
+      if (result.isEmpty) {
         await db.insert('categories', category);
       }
     }
@@ -248,5 +426,42 @@ class DatabaseService {
       whereArgs: [name],
     );
     return result.isNotEmpty;
+  }
+
+  // --- Attachments ---
+  static Future<int> insertAttachment(Map<String, dynamic> data) async {
+    final db = await database;
+    return await db.insert('transaction_attachments', data);
+  }
+
+  static Future<List<Map<String, dynamic>>> getAttachmentsByTransaction(
+    int transactionId,
+  ) async {
+    final db = await database;
+    return await db.query(
+      'transaction_attachments',
+      where: 'transaction_id = ?',
+      whereArgs: [transactionId],
+      orderBy: 'created_at DESC',
+    );
+  }
+
+  static Future<int> deleteAttachment(int id) async {
+    final db = await database;
+    return await db.delete(
+      'transaction_attachments',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  static Future<Map<String, dynamic>?> getAttachmentById(int id) async {
+    final db = await database;
+    final result = await db.query(
+      'transaction_attachments',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    return result.isNotEmpty ? result.first : null;
   }
 }
