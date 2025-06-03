@@ -7,7 +7,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:open_file/open_file.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:io';
-import 'dart:io' show Platform, Process;
 import '../widgets/calculator_dialog.dart';
 
 // Temporary Account class definition (replace with your actual Account model or import)
@@ -94,7 +93,6 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
     _commentController = TextEditingController(text: widget.comment);
     _category = widget.category;
     _color = widget.color;
-    _type = _getCategoryType(_category);
     _selectedDateTime = _tryParseDateTime(widget.subtitle);
 
     _loadAccounts();
@@ -109,15 +107,21 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
       accounts.addAll(data.map((a) => Account(id: a['id'], name: a['name'])));
     });
 
-    // Получаем счет по account_id из записи транзакции
+    // Получаем счет по account_id и тип из записи транзакции
     if (widget.id.isNotEmpty) {
       final transaction = await DatabaseService.getTransactionById(widget.id);
-      if (transaction != null && transaction['account_id'] != null) {
-        final account = await DatabaseService.getAccountById(
-          transaction['account_id'],
-        );
+      if (transaction != null) {
+        if (transaction['account_id'] != null) {
+          final account = await DatabaseService.getAccountById(
+            transaction['account_id'],
+          );
+          setState(() {
+            selectedAccountId = account?['id'];
+          });
+        }
+        // Всегда берём тип из базы
         setState(() {
-          selectedAccountId = account?['id'];
+          _type = transaction['type'];
         });
       }
     }
@@ -269,6 +273,13 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
   void _updateTypeFromCategory(String category) {
     setState(() {
       _type = _getCategoryType(category);
+      // Корректно форматируем сумму при смене типа
+      final amount =
+          double.tryParse(_amountController.text.replaceAll(',', '.')) ?? 0.0;
+      _amountController.text = amount
+          .abs()
+          .toStringAsFixed(2)
+          .replaceAll('.', ',');
     });
   }
 
@@ -426,21 +437,15 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
           return;
         }
 
-        // Форматируем сумму перед сохранением
-        final formattedAmount = _formatAmountWithFixedDecimals(
-          _amountController.text,
-        );
-        _amountController.text = formattedAmount;
-
-        // Корректно преобразуем сумму: '5003,54' -> 5003.54 (double)
+        // Корректно парсим сумму
         final amount =
-            double.parse(formattedAmount.replaceAll(',', '.')) *
-            (_type == 'расход' ? -1 : 1);
+            double.tryParse(_amountController.text.replaceAll(',', '.')) ?? 0.0;
+        final signedAmount = _type == 'расход' ? -amount : amount;
 
         final updatedTransaction = {
           'id': widget.id,
           'title': _titleController.text,
-          'amount': amount,
+          'amount': signedAmount,
           'type': _type,
           'category_id': categoryId,
           'date': dateToSave?.toIso8601String(),
@@ -451,6 +456,26 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
         await DatabaseService.updateTransaction(updatedTransaction);
         if (!mounted) return;
 
+        // После сохранения — перезагружаем данные из базы
+        final updated = await DatabaseService.getTransactionById(widget.id);
+        if (updated != null) {
+          setState(() {
+            _type = updated['type'];
+            final double newAmount =
+                (updated['amount'] is String)
+                    ? double.tryParse(updated['amount']) ?? 0.0
+                    : (updated['amount'] as num?)?.toDouble() ?? 0.0;
+            _amountController.text = newAmount
+                .abs()
+                .toStringAsFixed(2)
+                .replaceAll('.', ',');
+            _titleController.text = updated['title'] ?? '';
+            _commentController.text = updated['description'] ?? '';
+            selectedAccountId = updated['account_id'] as int?;
+            // и другие поля при необходимости
+          });
+        }
+
         // Показываем сообщение об успехе
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -459,8 +484,8 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
           ),
         );
 
-        // Возвращаемся на главный экран
-        Navigator.of(context).popUntil((route) => route.isFirst);
+        // Возвращаемся на предыдущий экран и сигнализируем об успешном изменении
+        Navigator.pop(context, true);
       } catch (e) {
         Logger(
           'TransactionDetailsScreen',
@@ -892,15 +917,32 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
                           const SizedBox(height: 6),
                           _isEditing
                               ? _buildAmountInput()
-                              : Text(
-                                _formatAmountWithFixedDecimals(
-                                  _amountController.text,
-                                ),
-                                style: TextStyle(
-                                  fontSize: 28,
-                                  fontWeight: FontWeight.bold,
-                                  color: _color,
-                                ),
+                              : Builder(
+                                builder: (context) {
+                                  final amount =
+                                      double.tryParse(
+                                        _amountController.text.replaceAll(
+                                          ',',
+                                          '.',
+                                        ),
+                                      ) ??
+                                      0.0;
+                                  final isExpense = _type == 'расход';
+                                  final color =
+                                      isExpense ? Colors.red : Colors.green;
+                                  final formatted = NumberFormat(
+                                    '##0.00',
+                                    'ru_RU',
+                                  ).format(amount.abs());
+                                  return Text(
+                                    (isExpense ? '-' : '') + formatted,
+                                    style: TextStyle(
+                                      fontSize: 28,
+                                      fontWeight: FontWeight.bold,
+                                      color: color,
+                                    ),
+                                  );
+                                },
                               ),
                         ],
                       ),

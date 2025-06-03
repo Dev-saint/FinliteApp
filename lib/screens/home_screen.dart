@@ -5,6 +5,8 @@ import '../models/account.dart' as model_account;
 import '../services/database_service.dart';
 import 'edit_account_screen.dart'; // Добавлен импорт
 import 'dart:io'; // Импортируем dart:io для работы с файлами
+import 'add_transaction_screen.dart';
+import 'edit_transaction_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -23,6 +25,7 @@ class HomeScreenState extends State<HomeScreen>
   DateTimeRange? customDateRange;
   List<Map<String, dynamic>> categories = [];
   final List<TransactionData> transactions = [];
+  double _balance = 0.0;
 
   @override
   bool get wantKeepAlive => true; // Сохраняем состояние при навигации
@@ -369,12 +372,15 @@ class HomeScreenState extends State<HomeScreen>
                           title: transaction.title,
                           subtitle: transaction.subtitle,
                           amount:
-                              '${transaction.amount > 0 ? '+' : ''}${transaction.amount} ₽',
+                              (transaction.amount > 0 ? '+' : '') +
+                              _formatBalance(transaction.amount),
                           color: transaction.color,
                           comment: transaction.comment,
                           onTap:
-                              (context, card) =>
-                                  _openTransactionDetailsScreen(context, card),
+                              (context, card) => _openTransactionDetailsScreen(
+                                context,
+                                card.id.toString(),
+                              ),
                         );
                       },
                     ),
@@ -623,25 +629,33 @@ class HomeScreenState extends State<HomeScreen>
     });
   }
 
-  Future<void> _openTransactionDetailsScreen(
+  void _openTransactionDetailsScreen(
     BuildContext context,
-    TransactionCard card,
+    String transactionId,
   ) async {
+    final card = transactions.firstWhere(
+      (t) => t.id.toString() == transactionId,
+    );
     final result = await Navigator.of(context).push(
-      _fadeRoute(
-        TransactionDetailsScreen(
-          id: card.id,
-          title: card.title,
-          subtitle: card.subtitle,
-          amount: card.amount,
-          color: card.color,
-          category: card.category['name'],
-          comment: card.comment,
-        ),
+      MaterialPageRoute(
+        builder:
+            (context) => TransactionDetailsScreen(
+              id: card.id.toString(),
+              title: card.title,
+              subtitle: card.subtitle,
+              amount: card.amount.toString(),
+              color: card.color,
+              category:
+                  card.category['id'] is int
+                      ? card.category['id']
+                      : int.tryParse(card.category['id'].toString()) ?? 0,
+              comment: card.comment,
+            ),
       ),
     );
     if (result == true) {
-      _loadTransactions();
+      await _loadTransactions();
+      await _updateBalance();
     }
   }
 
@@ -701,6 +715,71 @@ class HomeScreenState extends State<HomeScreen>
   // Метод для обновления транзакций, вызываемый извне
   Future<void> updateTransactions() async {
     await _loadTransactions();
+  }
+
+  void _openAddTransactionScreen(BuildContext context) async {
+    final result = await Navigator.of(
+      context,
+    ).push(_fadeRoute(const AddTransactionScreen()));
+    if (result == true) {
+      await _loadTransactions();
+      await _updateBalance();
+    }
+  }
+
+  void _openEditTransactionScreen(
+    BuildContext context,
+    int transactionId,
+  ) async {
+    final result = await Navigator.of(
+      context,
+    ).push(_fadeRoute(EditTransactionScreen(transactionId: transactionId)));
+    if (result == true) {
+      await _loadTransactions();
+      await _updateBalance();
+    }
+  }
+
+  Future<void> _deleteTransaction(int transactionId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text("Удалить транзакцию"),
+            content: const Text(
+              "Вы уверены, что хотите удалить эту транзакцию?",
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text("Отмена"),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text("Удалить"),
+              ),
+            ],
+          ),
+    );
+    if (confirm == true) {
+      await DatabaseService.deleteTransaction(transactionId.toString());
+      await _loadTransactions();
+      await _updateBalance();
+    }
+  }
+
+  Future<void> _updateBalance() async {
+    final transactions = await DatabaseService.getAllTransactions();
+    double balance = 0.0;
+    for (var t in transactions) {
+      if (t['type'] == 'доход') {
+        balance += (t['amount'] as num).toDouble();
+      } else if (t['type'] == 'расход')
+        balance -= (t['amount'] as num).toDouble();
+    }
+    setState(() {
+      _balance = balance;
+    });
   }
 }
 
@@ -807,11 +886,11 @@ class _SummaryColumn extends StatelessWidget {
 
   static String _shortenNumber(double value) {
     if (value.abs() >= 1e9) {
-      return (value / 1e9).toStringAsFixed(1).replaceAll('.0', '') + 'B';
+      return '${(value / 1e9).toStringAsFixed(1).replaceAll('.0', '')}B';
     } else if (value.abs() >= 1e6) {
-      return (value / 1e6).toStringAsFixed(1).replaceAll('.0', '') + 'M';
+      return '${(value / 1e6).toStringAsFixed(1).replaceAll('.0', '')}M';
     } else if (value.abs() >= 1e3) {
-      return (value / 1e3).toStringAsFixed(1).replaceAll('.0', '') + 'K';
+      return '${(value / 1e3).toStringAsFixed(1).replaceAll('.0', '')}K';
     } else {
       return value.toStringAsFixed(2);
     }
@@ -841,7 +920,7 @@ class _SummaryColumn extends StatelessWidget {
           ),
           const SizedBox(height: 2),
           Text(
-            value.toStringAsFixed(2) + ' ₽',
+            '${value.toStringAsFixed(2)} ₽',
             style: TextStyle(
               color: valueColor.withOpacity(0.7),
               fontSize: 13,

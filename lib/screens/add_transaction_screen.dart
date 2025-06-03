@@ -173,11 +173,11 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
   Future<void> _saveTransaction() async {
     if (formKey.currentState?.validate() ?? false) {
+      final double amount =
+          double.tryParse(amountController.text.replaceAll(',', '.')) ?? 0.0;
       final transaction = {
         'title': titleController.text,
-        'amount':
-            double.tryParse(amountController.text.replaceAll(',', '.')) ??
-            0.0 * (selectedType == 'расход' ? -1 : 1),
+        'amount': selectedType == 'расход' ? -amount : amount,
         'type': selectedType,
         'category_id': selectedCategoryId,
         'date': selectedDateTime?.toIso8601String(),

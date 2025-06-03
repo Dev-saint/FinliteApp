@@ -33,9 +33,9 @@ class TransactionModel {
     return TransactionModel(
       id: map['id'] as int?,
       amount:
-          (map['amount'] is int)
-              ? (map['amount'] as int).toDouble()
-              : (map['amount'] as double? ?? 0),
+          (map['amount'] is String)
+              ? double.tryParse(map['amount']) ?? 0.0
+              : (map['amount'] as num?)?.toDouble() ?? 0.0,
       type: map['type'] as String,
       categoryId: map['category_id'] as int,
       accountId: map['account_id'] as int, // Привязка к счету

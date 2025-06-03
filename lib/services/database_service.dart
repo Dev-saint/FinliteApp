@@ -220,6 +220,13 @@ class DatabaseService {
 
   static Future<int> insertTransaction(Map<String, dynamic> data) async {
     final db = await database;
+    // Гарантируем, что amount — double
+    if (data['amount'] is String) {
+      data['amount'] =
+          double.tryParse(data['amount'].replaceAll(',', '.')) ?? 0.0;
+    } else if (data['amount'] is int) {
+      data['amount'] = (data['amount'] as int).toDouble();
+    }
     final id = await db.insert('transactions', data);
     if (data['account_id'] != null) {
       await _recalculateAccountBalance(data['account_id'] as int);
@@ -234,6 +241,13 @@ class DatabaseService {
 
   static Future<int> updateTransaction(Map<String, dynamic> data) async {
     final db = await database;
+    // Гарантируем, что amount — double
+    if (data['amount'] is String) {
+      data['amount'] =
+          double.tryParse(data['amount'].replaceAll(',', '.')) ?? 0.0;
+    } else if (data['amount'] is int) {
+      data['amount'] = (data['amount'] as int).toDouble();
+    }
     final result = await db.update(
       'transactions',
       data,

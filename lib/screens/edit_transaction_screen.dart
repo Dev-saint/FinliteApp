@@ -35,10 +35,17 @@ class _EditTransactionScreenState extends State<EditTransactionScreen> {
     );
     if (transaction != null) {
       setState(() {
-        _amountController.text = transaction['amount'].toString();
+        // Корректно форматируем сумму для отображения
+        final double amount =
+            (transaction['amount'] is String)
+                ? double.tryParse(transaction['amount']) ?? 0.0
+                : (transaction['amount'] as num?)?.toDouble() ?? 0.0;
+        _amountController.text = amount.abs().toStringAsFixed(2);
         _descriptionController.text = transaction['description'] ?? '';
         _selectedType = transaction['type'];
-        selectedCategoryId = transaction['category'] as int?;
+        selectedCategoryId =
+            transaction['category_id'] as int? ??
+            transaction['category'] as int?;
       });
     }
   }
@@ -150,12 +157,19 @@ class _EditTransactionScreenState extends State<EditTransactionScreen> {
               const SizedBox(height: 24),
               ElevatedButton(
                 onPressed: () async {
+                  final double amount =
+                      double.tryParse(
+                        _amountController.text.replaceAll(',', '.').trim(),
+                      ) ??
+                      0.0;
+                  final double signedAmount =
+                      _selectedType == 'расход' ? -amount : amount;
                   final updatedTransaction = {
                     'id': widget.transactionId,
-                    'amount': double.tryParse(_amountController.text.trim()),
+                    'amount': signedAmount,
                     'description': _descriptionController.text.trim(),
                     'type': _selectedType,
-                    'category': selectedCategoryId,
+                    'category_id': selectedCategoryId,
                   };
                   await DatabaseService.updateTransaction(updatedTransaction);
                   if (!mounted) return;
