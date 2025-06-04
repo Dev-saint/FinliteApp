@@ -217,15 +217,16 @@ class _CalculatorDialogState extends State<CalculatorDialog> {
   @override
   Widget build(BuildContext context) {
     final buttonRows = [
-      ['C', '⌫', '÷', '7'],
-      ['8', '9', '×', '4'],
-      ['5', '6', '-', '1'],
-      ['2', '3', '+', '0'],
-      [',', '=', '', ''],
+      ['C', '⌫', '%', '÷'],
+      ['7', '8', '9', '×'],
+      ['4', '5', '6', '-'],
+      ['1', '2', '3', '+'],
+      ['0', ',', '=', ''],
     ];
     final buttonActions = <String, VoidCallback>{
       'C': _onClear,
       '⌫': _onDelete,
+      '%': () => _onOperatorPress('%'),
       '÷': () => _onOperatorPress('/'),
       '×': () => _onOperatorPress('*'),
       '-': () => _onOperatorPress('-'),

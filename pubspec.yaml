@@ -53,6 +53,7 @@ dependencies:
   open_file: ^3.3.2
   file_selector: ^1.0.3
   url_launcher: ^6.2.5
+  http: ^1.1.0
 
 dev_dependencies:
   flutter_test:

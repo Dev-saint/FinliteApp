@@ -8,6 +8,9 @@ import 'package:open_file/open_file.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:io';
 import '../widgets/calculator_dialog.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:flutter/services.dart';
 
 // Temporary Account class definition (replace with your actual Account model or import)
 class Account {
@@ -142,7 +145,7 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
 
   Future<void> _loadAttachments() async {
     final attachmentsData = await DatabaseService.getAttachmentsByTransaction(
-      int.parse(widget.id),
+      widget.id,
     );
     setState(() {
       attachments =
@@ -544,11 +547,19 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
           final copiedPath = await FileService.copyToAttachments(
             File(file.path!),
           );
+          // Определяем тип файла по расширению
+          String fileType = '';
+          final dotIndex = file.name.lastIndexOf('.');
+          if (dotIndex != -1 && dotIndex < file.name.length - 1) {
+            fileType = file.name.substring(dotIndex + 1).toLowerCase();
+          }
           final attachmentId = await DatabaseService.insertAttachment({
             'transaction_id': int.parse(widget.id),
             'file_name': file.name,
             'file_path': copiedPath,
             'created_at': DateTime.now().toIso8601String(),
+            'file_type': fileType,
+            'file_size': file.size ?? 0,
           });
           setState(() {
             attachments.add(
@@ -688,6 +699,150 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
     return '${amount.toStringAsFixed(2)} ₽';
   }
 
+  // --- Выделение названия сервиса из названия операции ---
+  Future<String?> _extractServiceName(String title) async {
+    final services = await DatabaseService.getAllServices();
+    for (final service in services) {
+      if (title.toLowerCase().contains(service.toLowerCase())) {
+        return service;
+      }
+    }
+    return null;
+  }
+
+  Future<List<String>> _fetchPromocodesFromBot(String service) async {
+    // Примеры промокодов для популярных сервисов РФ
+    final mockPromos = {
+      'Яндекс.Еда': [
+        'Скидка 20% — YANFOOD20',
+        'Бесплатная доставка — YANDELIVERY',
+        'Скидка 300₽ — EDA300',
+        'Скидка 15% на первый заказ — EDAFIRST15',
+        'Скидка 10% — YEDATEN',
+      ],
+      'Яндекс Еда': [
+        'Скидка 20% — YANFOOD20',
+        'Бесплатная доставка — YANDELIVERY',
+        'Скидка 300₽ — EDA300',
+        'Скидка 15% на первый заказ — EDAFIRST15',
+        'Скидка 10% — YEDATEN',
+      ],
+      'Самокат': [
+        'Скидка 20% — SAMOKAT20',
+        'Скидка 300₽ — SAMOKAT300',
+        'Бесплатная доставка — SAMOKATFREE',
+      ],
+      'Delivery Club': [
+        'Скидка 25% — DELICLUB25',
+        'Скидка 400₽ — DELI400',
+        'Скидка 10% на первый заказ — DELIFIRST10',
+      ],
+      'ВкусВилл': ['Скидка 10% — VKUSVILL10', 'Скидка 200₽ — VKUS200'],
+      'Лента': ['Скидка 5% — LENTA5', 'Скидка 300₽ — LENTA300'],
+      'Перекрёсток': ['Скидка 7% — PEREK7', 'Скидка 250₽ — PEREK250'],
+      'Пятёрочка': ['Скидка 5% — PYATEROCHKA5', 'Скидка 150₽ — PYAT150'],
+      'Магнит': ['Скидка 5% — MAGNIT5', 'Скидка 200₽ — MAGNIT200'],
+      'СберМаркет': ['Скидка 10% — SBERMARKET10', 'Скидка 300₽ — SBER300'],
+      'Burger King': ['Скидка 12% — BK12', 'Скидка 180₽ — BK180'],
+      'AliExpress': ['Скидка 8% — ALI8', 'Скидка 500₽ — ALI500'],
+      'Ostrovok': ['Скидка 7% — OSTROVOK7', 'Скидка 1000₽ — OSTROVOK1000'],
+      'Ламода': ['Скидка 10% — LAMODA10', 'Скидка 400₽ — LAMODA400'],
+      'DNS': ['Скидка 5% — DNS5', 'Скидка 500₽ — DNS500'],
+      'М.Видео': ['Скидка 7% — MVIDEO7', 'Скидка 1000₽ — MVIDEO1000'],
+      'Эльдорадо': ['Скидка 6% — ELDORADO6', 'Скидка 800₽ — ELDORADO800'],
+    };
+
+    // Имитируем задержку сети
+    await Future.delayed(const Duration(seconds: 2));
+
+    // Возвращаем промокоды, если есть, иначе сообщение об отсутствии
+    if (mockPromos.containsKey(service)) {
+      return mockPromos[service]!;
+    } else {
+      return ['Нет актуальных промокодов.'];
+    }
+  }
+
+  // TODO: Реализовать интеграцию с реальным API или Telegram-ботом для получения промокодов
+  Future<List<String>> _fetchPromocodesFromRealApi(String service) async {
+    // TODO: Реализовать обращение к реальному API
+    return [];
+  }
+
+  void _showPromocodesDialog(List<String> promoList) {
+    // Парсим строки вида "Название — ПРОМОКОД"
+    final parsed =
+        promoList
+            .map((line) {
+              final match = RegExp(r'(.+?)\s*[—-]\s*(\S+)').firstMatch(line);
+              if (match != null) {
+                return {
+                  'title': match.group(1)!.trim(),
+                  'code': match.group(2)!.trim(),
+                };
+              } else {
+                return {'title': '', 'code': line.trim()};
+              }
+            })
+            .where((e) => e['code'] != null && e['code']!.isNotEmpty)
+            .toList();
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Промокоды'),
+          content:
+              promoList.isEmpty ||
+                      (promoList.length == 1 &&
+                          promoList[0].toLowerCase().contains(
+                            'нет актуальных промокодов',
+                          ))
+                  ? const Text('Нет актуальных промокодов')
+                  : SizedBox(
+                    width: 350,
+                    height: 300,
+                    child: ListView.separated(
+                      itemCount: parsed.length,
+                      separatorBuilder: (_, __) => const Divider(),
+                      itemBuilder: (context, i) {
+                        final item = parsed[i];
+                        return ListTile(
+                          title: Text(
+                            item['title']!.isNotEmpty
+                                ? item['title']!
+                                : 'Промокод',
+                          ),
+                          subtitle: SelectableText(item['code']!),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.copy),
+                            tooltip: 'Скопировать',
+                            onPressed: () {
+                              Clipboard.setData(
+                                ClipboardData(text: item['code']!),
+                              );
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Промокод скопирован!'),
+                                ),
+                              );
+                            },
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Закрыть'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -741,6 +896,37 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
                   children: [
                     _getCategoryIconWidget(_currentCategory),
                     const SizedBox(height: 24),
+                    if (_isEditing)
+                      DropdownButtonFormField<int?>(
+                        decoration: const InputDecoration(labelText: 'Счёт *'),
+                        items:
+                            accounts
+                                .map(
+                                  (account) => DropdownMenuItem(
+                                    value: account.id,
+                                    child: Text(account.name),
+                                  ),
+                                )
+                                .toList(),
+                        value: selectedAccountId,
+                        onChanged: (value) {
+                          setState(() {
+                            selectedAccountId = value;
+                          });
+                        },
+                        validator: (value) {
+                          if (accounts.isEmpty) {
+                            return 'Сначала создайте хотя бы один счёт.';
+                          }
+                          return value == null ? 'Выберите счёт' : null;
+                        },
+                      ),
+                    if (!(_isEditing))
+                      Text(
+                        'Счёт: ${accounts.firstWhere((a) => a.id == selectedAccountId, orElse: () => Account(id: null, name: 'Неизвестно')).name}',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    const SizedBox(height: 12),
                     _isEditing
                         ? DropdownButtonFormField<String>(
                           value: _type,
@@ -772,8 +958,9 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
                         ? TextFormField(
                           controller: _titleController,
                           decoration: const InputDecoration(
-                            labelText: 'Название',
+                            labelText: 'Название *',
                             hintText: 'Введите название операции',
+                            errorStyle: TextStyle(color: Colors.red),
                           ),
                           validator: _validateTitle,
                           maxLength: 100,
@@ -858,31 +1045,6 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
                     const SizedBox(height: 8),
-                    if (_isEditing)
-                      DropdownButtonFormField<int?>(
-                        decoration: const InputDecoration(labelText: 'Счёт'),
-                        items:
-                            accounts
-                                .map(
-                                  (account) => DropdownMenuItem(
-                                    value: account.id,
-                                    child: Text(account.name),
-                                  ),
-                                )
-                                .toList(),
-                        value: selectedAccountId,
-                        onChanged: (value) {
-                          setState(() {
-                            selectedAccountId = value;
-                          });
-                        },
-                      )
-                    else
-                      Text(
-                        'Счёт: ${accounts.firstWhere((a) => a.id == selectedAccountId, orElse: () => Account(id: null, name: 'Неизвестно')).name}',
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                    const SizedBox(height: 24),
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(16),
@@ -1125,54 +1287,50 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
-            child: Column(
-              children: [
-                if (!_isEditing)
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: _startEdit,
-                      icon: const Icon(Icons.edit),
-                      label: const Text('Редактировать'),
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(48),
-                      ),
+            child:
+                !_isEditing
+                    ? Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: _startEdit,
+                            icon: const Icon(Icons.edit),
+                            label: const Text('Редактировать'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: _onFindPromocodesPressed,
+                            icon: const Icon(Icons.local_offer),
+                            label: const Text('Найти промокоды'),
+                          ),
+                        ),
+                      ],
+                    )
+                    : Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: _saveEdit,
+                            icon: const Icon(Icons.save),
+                            label: const Text('Сохранить'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              setState(() {
+                                _isEditing = false;
+                              });
+                            },
+                            icon: const Icon(Icons.close),
+                            label: const Text('Отмена'),
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                if (_isEditing)
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: _saveEdit,
-                      icon: const Icon(Icons.save),
-                      label: const Text('Сохранить'),
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(48),
-                      ),
-                    ),
-                  ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      if (_isEditing) {
-                        setState(() {
-                          _isEditing = false;
-                        });
-                      } else {
-                        Navigator.pop(context);
-                      }
-                    },
-                    icon: Icon(_isEditing ? Icons.close : Icons.arrow_back),
-                    label: Text(_isEditing ? 'Отмена' : 'Назад'),
-                    style: ElevatedButton.styleFrom(
-                      minimumSize: const Size.fromHeight(48),
-                    ),
-                  ),
-                ),
-              ],
-            ),
           ),
         ],
       ),
@@ -1227,5 +1385,23 @@ class _TransactionDetailsScreenState extends State<TransactionDetailsScreen> {
         }
       },
     );
+  }
+
+  // --- Поиск промокодов ---
+  Future<void> _onFindPromocodesPressed() async {
+    final service = await _extractServiceName(_titleController.text);
+    if (service == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Не удалось определить сервис по названию операции.'),
+        ),
+      );
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('Ищем промокоды для: $service...')));
+    final promoList = await _fetchPromocodesFromBot(service);
+    _showPromocodesDialog(promoList);
   }
 }

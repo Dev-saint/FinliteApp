@@ -139,28 +139,15 @@ class HomeScreenState extends State<HomeScreen>
                       const SizedBox(height: 4),
                       Text(
                         selectedAccountId == null
-                            ? _formatBalance(
-                              accounts.fold<double>(
-                                0,
-                                (sum, a) => sum + a.balance,
-                              ),
-                            )
-                            : _formatBalance(
-                              accounts
-                                  .firstWhere(
-                                    (a) => a.id == selectedAccountId,
-                                    orElse:
-                                        () => model_account.Account(
-                                          id: null,
-                                          name: '',
-                                          balance: 0,
-                                        ),
-                                  )
-                                  .balance,
-                            ),
-                        style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
+                            ? _formatBalance(_balance)
+                            : _formatBalance(_balance),
+                        style: Theme.of(
+                          context,
+                        ).textTheme.headlineMedium?.copyWith(
+                          color:
+                              _balance >= 0
+                                  ? Colors.green
+                                  : Theme.of(context).colorScheme.error,
                         ),
                       ),
                     ],
@@ -358,17 +345,7 @@ class HomeScreenState extends State<HomeScreen>
                         final transaction = transactions[index];
                         return TransactionCard(
                           id: transaction.id,
-                          category: categories.firstWhere(
-                            (category) =>
-                                category['id'] ==
-                                int.tryParse(transaction.category),
-                            orElse:
-                                () => {
-                                  'name': 'Неизвестно',
-                                  'customIconPath': null,
-                                  'icon': null,
-                                },
-                          ),
+                          category: transaction.category,
                           title: transaction.title,
                           subtitle: transaction.subtitle,
                           amount:
@@ -512,6 +489,7 @@ class HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _loadTransactions() async {
+    await _updateBalance();
     if (!mounted) return;
 
     final data = await DatabaseService.getTransactionsByAccount(
@@ -578,7 +556,15 @@ class HomeScreenState extends State<HomeScreen>
               (t) => TransactionData(
                 id: t['id'].toString(),
                 accountId: t['account_id'],
-                category: (t['category_id'] ?? '').toString(),
+                category: categories.firstWhere(
+                  (cat) => cat['id'] == t['category_id'],
+                  orElse:
+                      () => {
+                        'name': 'Неизвестно',
+                        'icon': null,
+                        'customIconPath': null,
+                      },
+                ),
                 title: t['title']?.toString() ?? '',
                 subtitle:
                     t['date'] != null
@@ -603,22 +589,15 @@ class HomeScreenState extends State<HomeScreen>
   Future<void> _loadAccounts() async {
     final data = await DatabaseService.getAllAccounts();
     setState(() {
-      accounts.clear();
-      accounts.addAll(
-        data.map(
-          (a) => model_account.Account(
-            id: a['id'],
-            name: a['name'],
-            balance:
-                (a['balance'] is int)
-                    ? (a['balance'] as int).toDouble()
-                    : (a['balance'] as double? ?? 0),
-          ),
-        ),
-      );
-      if (!accounts.any((account) => account.id == selectedAccountId)) {
-        selectedAccountId = accounts.isNotEmpty ? accounts.first.id : null;
-      }
+      accounts =
+          data
+              .map(
+                (a) => model_account.Account(
+                  id: a['id'] as int?,
+                  name: a['name'] as String,
+                ),
+              )
+              .toList();
     });
   }
 
@@ -645,10 +624,7 @@ class HomeScreenState extends State<HomeScreen>
               subtitle: card.subtitle,
               amount: card.amount.toString(),
               color: card.color,
-              category:
-                  card.category['id'] is int
-                      ? card.category['id']
-                      : int.tryParse(card.category['id'].toString()) ?? 0,
+              category: card.category['name']?.toString() ?? 'Неизвестно',
               comment: card.comment,
             ),
       ),
@@ -740,7 +716,7 @@ class HomeScreenState extends State<HomeScreen>
     }
   }
 
-  Future<void> _deleteTransaction(int transactionId) async {
+  Future<void> _deleteTransaction(String id) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder:
@@ -762,31 +738,36 @@ class HomeScreenState extends State<HomeScreen>
           ),
     );
     if (confirm == true) {
-      await DatabaseService.deleteTransaction(transactionId.toString());
+      await DatabaseService.deleteTransaction(id);
       await _loadTransactions();
-      await _updateBalance();
     }
   }
 
   Future<void> _updateBalance() async {
-    final transactions = await DatabaseService.getAllTransactions();
-    double balance = 0.0;
-    for (var t in transactions) {
-      if (t['type'] == 'доход') {
-        balance += (t['amount'] as num).toDouble();
-      } else if (t['type'] == 'расход')
-        balance -= (t['amount'] as num).toDouble();
+    double newBalance;
+    if (selectedAccountId == null) {
+      newBalance = await DatabaseService.calculateTotalBalance();
+    } else {
+      newBalance = await DatabaseService.calculateAccountBalance(
+        selectedAccountId!,
+      );
     }
     setState(() {
-      _balance = balance;
+      _balance = newBalance;
     });
+  }
+
+  int _parseCategoryId(dynamic id) {
+    if (id is int) return id;
+    if (id is String) return int.tryParse(id) ?? 0;
+    return 0;
   }
 }
 
 class TransactionData {
-  final String id; // Добавлено поле id
-  final int accountId; // Добавлено поле accountId
-  final String category;
+  final String id;
+  final int accountId;
+  final Map<String, dynamic> category;
   final String title;
   final String subtitle;
   final double amount;
@@ -808,8 +789,7 @@ class TransactionData {
 // --- Карточка транзакции ---
 class TransactionCard extends StatelessWidget {
   final String id;
-  final Map<String, dynamic>
-  category; // Передаем категорию как Map<String, dynamic>
+  final Map<String, dynamic> category;
   final String title;
   final String subtitle;
   final String amount;

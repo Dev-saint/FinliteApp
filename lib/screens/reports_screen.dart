@@ -76,10 +76,22 @@ class _ReportsScreenState extends State<ReportsScreen> {
     _loadAll();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Каждый раз при возврате на экран отчётов обновляем данные
+    _loadAll();
+  }
+
   Future<void> _loadAll() async {
     final fetchedTransactions = await DatabaseService.getAllTransactions();
     final fetchedCategories = await DatabaseService.getAllCategories();
     final fetchedAccounts = await DatabaseService.getAllAccounts();
+    // Диагностика структуры транзакции
+    print('Пример транзакции:');
+    print(
+      fetchedTransactions.isNotEmpty ? fetchedTransactions.first : 'нет данных',
+    );
     setState(() {
       transactions = fetchedTransactions;
       categories = fetchedCategories;
@@ -150,6 +162,18 @@ class _ReportsScreenState extends State<ReportsScreen> {
       );
     }
 
+    // Проверка наличия данных для выбранного периода
+    final hasData = transactions.any((tx) {
+      final date = DateTime.tryParse(tx['date'] ?? '') ?? DateTime.now();
+      return _isInSelectedPeriod(date);
+    });
+
+    if (!hasData) {
+      return const Center(
+        child: Text('Нет данных для отображения за выбранный период'),
+      );
+    }
+
     switch (selectedReportType) {
       case '📊 Расходы по категориям':
         return _buildPieChart(false);
@@ -171,7 +195,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   Widget _buildPieChart(bool isIncome) {
     final filtered = transactions.where((tx) {
       final date = DateTime.tryParse(tx['date'] ?? '') ?? DateTime.now();
-      final amount = tx['amount'];
+      final amount = tx['amount'] as num;
       return _isInSelectedPeriod(date) &&
           ((isIncome && amount > 0) || (!isIncome && amount < 0));
     });
@@ -180,9 +204,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
       return const Center(child: Text('Нет данных для отображения'));
     }
 
-    final Map<String, int> categoryTotals = {};
+    final Map<String, double> categoryTotals = {};
     for (var tx in filtered) {
-      final dynamic rawCategoryId = tx['category'] ?? tx['categoryId'];
+      final dynamic rawCategoryId =
+          tx['category_id'] ?? tx['categoryId'] ?? tx['category'];
       final int? categoryId =
           rawCategoryId is String ? int.tryParse(rawCategoryId) : rawCategoryId;
       final category = categories.firstWhere(
@@ -191,10 +216,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
       );
       final name = category['name'];
       categoryTotals[name] =
-          (categoryTotals[name] ?? 0) + (tx['amount'] as num).abs().toInt();
+          (categoryTotals[name] ?? 0) + (tx['amount'] as num).abs().toDouble();
     }
 
-    final total = categoryTotals.values.fold(0, (a, b) => a + b);
+    final total = categoryTotals.values.fold(0.0, (a, b) => a + b);
     final List<Color> colors = [
       Colors.blue,
       Colors.green,
@@ -214,7 +239,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
           final percentage = (e.value / total * 100).toStringAsFixed(1);
           return PieChartSectionData(
             color: color,
-            value: e.value.toDouble(),
+            value: e.value,
             title: '$percentage%',
             titleStyle: const TextStyle(
               color: Colors.white,
@@ -241,7 +266,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                             radius: isTouched ? 110 : 100,
                             title:
                                 isTouched
-                                    ? '${data.value.toStringAsFixed(0)} ₽'
+                                    ? '${data.value.toStringAsFixed(2)} ₽'
                                     : data.title,
                             titleStyle: const TextStyle(
                               color: Colors.white,
@@ -290,7 +315,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   Widget _buildAccountsPieChart() {
-    final Map<String, int> incomeMap = {}, expenseMap = {};
+    final Map<String, double> incomeMap = {}, expenseMap = {};
     final Map<String, Color> accountColors = {};
 
     for (var tx in transactions) {
@@ -306,10 +331,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
       final amount = tx['amount'] as num;
       if (amount >= 0) {
-        incomeMap[name] = (incomeMap[name] ?? 0) + amount.toInt();
+        incomeMap[name] = (incomeMap[name] ?? 0) + amount.toDouble();
       } else {
-        expenseMap[name] = (expenseMap[name] ?? 0) + amount.abs().toInt();
+        expenseMap[name] = (expenseMap[name] ?? 0) + amount.abs().toDouble();
       }
+    }
+
+    if (incomeMap.isEmpty && expenseMap.isEmpty) {
+      return const Center(child: Text('Нет данных для отображения'));
     }
 
     List<Color> colors = [
@@ -322,8 +351,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
       Colors.indigo,
     ];
 
-    Widget buildPie(Map<String, int> data, bool isIncome) {
-      final total = data.values.fold(0, (a, b) => a + b);
+    Widget buildPie(Map<String, double> data, bool isIncome) {
+      final total = data.values.fold(0.0, (a, b) => a + b);
       final touchedIndex =
           isIncome ? _touchedIncomeIndex : _touchedExpenseIndex;
 
@@ -337,7 +366,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
             final isTouched = i == touchedIndex;
             return PieChartSectionData(
               color: color,
-              value: e.value.toDouble(),
+              value: e.value,
               title:
                   isTouched
                       ? ''
@@ -350,7 +379,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
               badgeWidget:
                   isTouched
                       ? Text(
-                        '${e.value} ₽',
+                        '${e.value.toStringAsFixed(2)} ₽',
                         style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
@@ -460,6 +489,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
       }
     }
 
+    if (income.isEmpty && expense.isEmpty) {
+      return const Center(child: Text('Нет данных для отображения'));
+    }
+
     final allDates = {...income.keys, ...expense.keys}.toList()..sort();
     final bars = <BarChartGroupData>[];
     for (int i = 0; i < allDates.length; i++) {
@@ -483,6 +516,29 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
     // Если дат много, делаем горизонтальный скролл
     final chartWidth = allDates.length > 7 ? allDates.length * 60.0 : null;
+
+    // Найти максимум для maxY
+    double maxY = 0;
+    for (final bar in bars) {
+      for (final rod in bar.barRods) {
+        if (rod.toY > maxY) maxY = rod.toY;
+      }
+    }
+    if (maxY < 100) {
+      maxY += 10;
+    } else {
+      maxY += maxY * 0.1;
+    }
+
+    // Рассчитываем шаг для подписей оси Y
+    double interval =
+        maxY <= 10
+            ? 2
+            : maxY <= 50
+            ? 5
+            : maxY <= 100
+            ? 10
+            : (maxY / 6).roundToDouble();
 
     final chart = SizedBox(
       width: chartWidth,
@@ -537,7 +593,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 final isIncome = rod.color == Colors.green;
                 final sign = isIncome ? '+' : '-';
                 return BarTooltipItem(
-                  '$sign${rod.toY.abs().toStringAsFixed(0)} ₽',
+                  '$sign${rod.toY.abs().toStringAsFixed(2)} ₽',
                   const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
@@ -546,6 +602,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
               },
             ),
           ),
+          maxY: maxY,
         ),
       ),
     );
@@ -576,6 +633,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
       balances[name] = (balances[name] ?? 0) + (tx['amount'] as num).toDouble();
     }
 
+    if (balances.isEmpty) {
+      return const Center(child: Text('Нет данных для отображения'));
+    }
+
     final labels = balances.keys.toList();
     final bars =
         labels.asMap().entries.map((e) {
@@ -591,6 +652,22 @@ class _ReportsScreenState extends State<ReportsScreen> {
           );
         }).toList();
 
+    final minValue = balances.values.reduce((a, b) => a < b ? a : b);
+    final maxValue = balances.values.reduce((a, b) => a > b ? a : b);
+    final hasNegative = minValue < 0;
+    final minY = hasNegative ? (minValue * 1.1).floorToDouble() : 0.0;
+    final maxY = (maxValue * 1.1).ceilToDouble();
+    final range = (maxY - minY).abs();
+    double interval;
+    if (range <= 10)
+      interval = 2;
+    else if (range <= 50)
+      interval = 5;
+    else if (range <= 100)
+      interval = 10;
+    else
+      interval = (range / 6).ceilToDouble();
+
     return BarChart(
       BarChartData(
         barGroups: bars,
@@ -600,11 +677,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
           drawHorizontalLine: true,
           getDrawingHorizontalLine: (value) {
             if (value == 0) {
-              return FlLine(
-                color: Colors.black,
-                strokeWidth: 1,
-                dashArray: [5, 5],
-              );
+              return FlLine(color: Colors.black, strokeWidth: 2);
             }
             return FlLine(color: Colors.grey, strokeWidth: 0.5);
           },
@@ -617,10 +690,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
               if (rod.toY == 0 || rod.toY.isNaN) {
                 return null;
               }
-              // Только минус для отрицательных значений, для положительных знак не нужен
               if (rod.toY < 0) {
                 return BarTooltipItem(
-                  '-${rod.toY.abs().toStringAsFixed(0)} ₽',
+                  '-${rod.toY.abs().toStringAsFixed(2)} ₽',
                   const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
@@ -628,7 +700,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 );
               } else {
                 return BarTooltipItem(
-                  '${rod.toY.abs().toStringAsFixed(0)} ₽',
+                  '${rod.toY.abs().toStringAsFixed(2)} ₽',
                   const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
@@ -647,27 +719,41 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 if (index < 0 || index >= labels.length) {
                   return const SizedBox();
                 }
-                return Text(
-                  labels[index],
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
+                return Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: Text(
+                    labels[index],
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
                   ),
-                  overflow: TextOverflow.ellipsis,
-                  maxLines: 1,
                 );
               },
+              reservedSize: 60,
             ),
           ),
           leftTitles: AxisTitles(
             sideTitles: SideTitles(
               showTitles: true,
-              reservedSize: 50,
+              reservedSize: 60,
+              interval: interval,
               getTitlesWidget: (value, _) {
-                return Text(
-                  formatShortNumber(value.toDouble()),
-                  style: const TextStyle(fontSize: 14),
-                  textAlign: TextAlign.right,
+                // Убираем дублирующиеся подписи
+                if ((value - minY) % interval != 0 &&
+                    value != maxY &&
+                    value != minY) {
+                  return const SizedBox.shrink();
+                }
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2.0),
+                  child: Text(
+                    formatShortNumber(value, digits: 1),
+                    style: const TextStyle(fontSize: 14),
+                    textAlign: TextAlign.right,
+                  ),
                 );
               },
             ),
@@ -682,13 +768,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
             bottom: BorderSide(color: Colors.black, width: 1),
           ),
         ),
-        baselineY: 0, // Устанавливаем ось X посередине
-        minY:
-            balances.values.reduce((a, b) => a < b ? a : b) -
-            10, // Добавляем отрицательные координаты
-        maxY:
-            balances.values.reduce((a, b) => a > b ? a : b) +
-            10, // Добавляем запас сверху
+        baselineY: 0,
+        minY: minY,
+        maxY: maxY,
       ),
     );
   }
@@ -698,9 +780,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
     for (var tx in transactions) {
       final date = DateTime.tryParse(tx['date'] ?? '');
       if (date == null || !_isInSelectedPeriod(date)) continue;
-      final categoryId = tx['category'] ?? tx['categoryId'];
+      final dynamic rawCategoryId =
+          tx['category_id'] ?? tx['categoryId'] ?? tx['category'];
+      final int? categoryId =
+          rawCategoryId is String ? int.tryParse(rawCategoryId) : rawCategoryId;
       final category = categories.firstWhere(
-        (c) => c['id'].toString() == categoryId.toString(),
+        (cat) => cat['id'] == categoryId,
         orElse: () => {'name': 'Неизвестно'},
       );
       final name = category['name'];
@@ -730,6 +815,29 @@ class _ReportsScreenState extends State<ReportsScreen> {
           );
         }).toList();
 
+    // Найти максимум для maxY
+    double maxY = 0;
+    for (final bar in bars) {
+      for (final rod in bar.barRods) {
+        if (rod.toY > maxY) maxY = rod.toY;
+      }
+    }
+    if (maxY < 100) {
+      maxY += 10;
+    } else {
+      maxY += maxY * 0.1;
+    }
+
+    // Рассчитываем шаг для подписей оси Y
+    double interval =
+        maxY <= 10
+            ? 2
+            : maxY <= 50
+            ? 5
+            : maxY <= 100
+            ? 10
+            : (maxY / 6).roundToDouble();
+
     return BarChart(
       BarChartData(
         barGroups: bars,
@@ -747,7 +855,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
               final isIncome = originalValue >= 0;
               final sign = isIncome ? '+' : '-';
               return BarTooltipItem(
-                '$sign${originalValue.abs().toStringAsFixed(0)} ₽',
+                '$sign${originalValue.abs().toStringAsFixed(2)} ₽',
                 const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
@@ -780,12 +888,20 @@ class _ReportsScreenState extends State<ReportsScreen> {
           leftTitles: AxisTitles(
             sideTitles: SideTitles(
               showTitles: true,
-              reservedSize: 40,
+              reservedSize: 56,
+              interval: interval,
               getTitlesWidget: (value, _) {
-                return Text(
-                  formatShortNumber(value.toDouble()),
-                  style: const TextStyle(fontSize: 14),
-                  textAlign: TextAlign.right,
+                // Не выводим дублирующееся maxY
+                if ((maxY - value).abs() < interval / 2 && value != maxY) {
+                  return const SizedBox.shrink();
+                }
+                return Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: Text(
+                    value.toStringAsFixed(0),
+                    style: const TextStyle(fontSize: 14),
+                    textAlign: TextAlign.right,
+                  ),
                 );
               },
             ),
@@ -801,6 +917,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
           ),
         ),
         minY: 0, // Минимальное значение Y всегда 0
+        maxY: maxY,
       ),
     );
   }
@@ -923,7 +1040,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
                               if (value == 'Произвольный период') {
                                 _selectCustomDateRange();
                               }
-                              setState(() => selectedPeriod = value!);
+                              setState(() {
+                                selectedPeriod = value!;
+                                generatePressed =
+                                    false; // Сбрасываем флаг при изменении периода
+                              });
                             },
                   ),
                 ),
@@ -941,7 +1062,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     onChanged:
                         (value) => setState(() {
                           selectedReportType = value!;
-                          generatePressed = false;
+                          generatePressed =
+                              false; // Сбрасываем флаг при изменении типа отчета
                         }),
                   ),
                 ),
@@ -951,7 +1073,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
             Align(
               alignment: Alignment.centerRight,
               child: ElevatedButton(
-                onPressed: () => setState(() => generatePressed = true),
+                onPressed: () async {
+                  await _loadAll();
+                  setState(() => generatePressed = true);
+                },
                 child: const Text('Построить отчет'),
               ),
             ),
@@ -974,11 +1099,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
 }
 
 // Функция для сокращения больших чисел (например, 3000000 -> 3kk)
-String formatShortNumber(num value) {
+String formatShortNumber(num value, {int digits = 1}) {
   if (value.abs() >= 1000000) {
-    return '${(value / 1000000).toStringAsFixed(value % 1000000 == 0 ? 0 : 1)}kk';
+    return '${(value / 1000000).toStringAsFixed(digits)}kk';
   } else if (value.abs() >= 1000) {
-    return '${(value / 1000).toStringAsFixed(value % 1000 == 0 ? 0 : 1)}k';
+    return '${(value / 1000).toStringAsFixed(digits)}k';
   } else {
     return value.toStringAsFixed(0);
   }

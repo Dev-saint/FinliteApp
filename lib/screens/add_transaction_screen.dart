@@ -188,14 +188,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       try {
         final id = await DatabaseService.insertTransaction(transaction);
         // Сохраняем вложения
-        for (final att in attachments) {
-          await DatabaseService.insertAttachment({
-            'transaction_id': id,
-            'file_name': att.fileName,
-            'file_path': att.filePath,
-            'created_at': DateTime.now().toIso8601String(),
-          });
-        }
+        await _saveAttachments(id);
         if (id > 0) {
           updateHomeScreenTransactions(); // Вызываем глобальный метод обновления
           if (!mounted) return;
@@ -208,6 +201,25 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           context,
         ).showSnackBar(SnackBar(content: Text(e.toString())));
       }
+    }
+  }
+
+  Future<void> _saveAttachments(int id) async {
+    for (var attachment in attachments) {
+      // Определяем тип файла по расширению
+      String fileType = '';
+      final dotIndex = attachment.fileName.lastIndexOf('.');
+      if (dotIndex != -1 && dotIndex < attachment.fileName.length - 1) {
+        fileType = attachment.fileName.substring(dotIndex + 1).toLowerCase();
+      }
+      await DatabaseService.insertAttachment({
+        'transaction_id': id.toString(),
+        'file_name': attachment.fileName,
+        'file_path': attachment.filePath,
+        'created_at': DateTime.now().toIso8601String(),
+        'file_type': fileType,
+        'file_size': File(attachment.filePath).lengthSync(),
+      });
     }
   }
 
@@ -259,23 +271,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         errorStyle: const TextStyle(color: Colors.red),
       ),
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      validator: (value) {
-        if (value == null || value.isEmpty) {
-          return 'Введите сумму';
-        }
-        final regex = RegExp(r'^\d+([.,]\d{0,2})?$');
-        if (!regex.hasMatch(value)) {
-          return 'Используйте формат: число с запятой и максимум 2 знаками после запятой (например: 1000,50)';
-        }
-        final amount = double.tryParse(value.replaceAll(',', '.'));
-        if (amount == null || amount <= 0) {
-          return 'Сумма должна быть больше нуля';
-        }
-        if (amount > 1000000000) {
-          return 'Сумма не должна превышать 1 000 000 000 ₽';
-        }
-        return null;
-      },
+      validator: _validateAmount,
       autovalidateMode: AutovalidateMode.onUserInteraction,
       onChanged: (value) {
         // Форматируем ввод с фиксированным форматом
@@ -308,6 +304,43 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     return value;
   }
 
+  // --- Валидация ---
+  String? _validateTitle(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Введите название операции';
+    }
+    if (value.length > 100) {
+      return 'Название не должно превышать 100 символов (сейчас: ${value.length})';
+    }
+    return null;
+  }
+
+  String? _validateAmount(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Введите сумму';
+    }
+    final regex = RegExp(r'^\d+([.,]\d{0,2})?$');
+    if (!regex.hasMatch(value)) {
+      return 'Используйте формат: число с запятой и максимум 2 знаками после запятой (например: 1000,50)';
+    }
+    final amount = double.tryParse(value.replaceAll(',', '.'));
+    if (amount == null || amount <= 0) {
+      return 'Сумма должна быть больше нуля';
+    }
+    if (amount > 1000000000) {
+      return 'Сумма не должна превышать 1 000 000 000 ₽';
+    }
+    return null;
+  }
+
+  String? _validateComment(String? value) {
+    if (value == null) return null;
+    if (value.length > 500) {
+      return 'Комментарий не должен превышать 500 символов (сейчас: ${value.length})';
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -321,11 +354,52 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             child: SingleChildScrollView(
               child: Column(
                 children: [
+                  DropdownButtonFormField<int?>(
+                    decoration: const InputDecoration(labelText: 'Счёт *'),
+                    items:
+                        accounts
+                            .map(
+                              (account) => DropdownMenuItem(
+                                value: account.id,
+                                child: Text(account.name),
+                              ),
+                            )
+                            .toList(),
+                    value: selectedAccountId,
+                    onChanged: (value) {
+                      setState(() {
+                        selectedAccountId = value;
+                      });
+                    },
+                    validator: (value) {
+                      if (accounts.isEmpty) {
+                        return 'Сначала создайте хотя бы один счёт.';
+                      }
+                      return value == null ? 'Выберите счёт' : null;
+                    },
+                  ),
+                  if (accounts.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        'Сначала создайте хотя бы один счёт.',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 12),
                   TextFormField(
                     controller: titleController,
                     decoration: const InputDecoration(
-                      labelText: 'Название транзакции',
+                      labelText: 'Название транзакции *',
+                      errorStyle: TextStyle(color: Colors.red),
                     ),
+                    validator: _validateTitle,
+                    maxLength: 100,
+                    textCapitalization: TextCapitalization.sentences,
+                    autovalidateMode: AutovalidateMode.onUserInteraction,
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
@@ -395,46 +469,11 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                     controller: commentController,
                     decoration: const InputDecoration(labelText: 'Комментарий'),
                     maxLines: 2,
+                    maxLength: 500,
+                    validator: _validateComment,
+                    textCapitalization: TextCapitalization.sentences,
+                    autovalidateMode: AutovalidateMode.onUserInteraction,
                   ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<int?>(
-                    decoration: const InputDecoration(labelText: 'Счёт *'),
-                    items:
-                        accounts
-                            .map(
-                              (account) => DropdownMenuItem(
-                                value:
-                                    account
-                                        .id, // Убедитесь, что передается правильный id счета
-                                child: Text(account.name),
-                              ),
-                            )
-                            .toList(),
-                    value: selectedAccountId,
-                    onChanged: (value) {
-                      setState(() {
-                        selectedAccountId =
-                            value; // Сохраняем выбранный id счета
-                      });
-                    },
-                    validator: (value) {
-                      if (accounts.isEmpty) {
-                        return 'Сначала создайте хотя бы один счёт.';
-                      }
-                      return value == null ? 'Выберите счёт' : null;
-                    },
-                  ),
-                  if (accounts.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        'Сначала создайте хотя бы один счёт.',
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
                   const SizedBox(height: 12),
                   Align(
                     alignment: Alignment.centerLeft,

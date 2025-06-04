@@ -25,13 +25,12 @@ class DatabaseService {
 
     return await openDatabase(
       path,
-      version: 4,
+      version: 8,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE accounts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            balance REAL NOT NULL DEFAULT 0
+            name TEXT NOT NULL
           )
         ''');
         await db.execute('''
@@ -61,93 +60,90 @@ class DatabaseService {
         await db.execute('''
           CREATE TABLE transaction_attachments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            transaction_id INTEGER NOT NULL,
-            file_name TEXT NOT NULL,
+            transaction_id TEXT NOT NULL,
             file_path TEXT NOT NULL,
+            file_name TEXT NOT NULL,
+            file_type TEXT NOT NULL,
+            file_size INTEGER NOT NULL,
             created_at TEXT NOT NULL,
             FOREIGN KEY (transaction_id) REFERENCES transactions (id)
           )
         ''');
+        await db.execute('''
+          CREATE TABLE services (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL
+          )
+        ''');
+        await _ensureDefaultServices(db);
         await ensureDefaultCategories(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
+          // Add category_id to transactions table
+          await db.execute(
+            'ALTER TABLE transactions ADD COLUMN category_id INTEGER',
+          );
+        }
+        if (oldVersion < 3) {
+          // Add transaction_attachments table
           await db.execute('''
             CREATE TABLE transaction_attachments (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
-              transaction_id INTEGER NOT NULL,
-              file_name TEXT NOT NULL,
+              transaction_id TEXT NOT NULL,
               file_path TEXT NOT NULL,
+              file_name TEXT NOT NULL,
+              file_type TEXT NOT NULL,
+              file_size INTEGER NOT NULL,
               created_at TEXT NOT NULL,
               FOREIGN KEY (transaction_id) REFERENCES transactions (id)
             )
           ''');
         }
-        if (oldVersion < 3) {
-          // Добавляем поле balance в accounts
-          await db.execute(
-            'ALTER TABLE accounts ADD COLUMN balance REAL NOT NULL DEFAULT 0',
-          );
-          // Меняем тип amount в transactions на REAL
-          // SQLite не поддерживает ALTER COLUMN, поэтому создаём новую таблицу и копируем данные
-          await db.execute(
-            'ALTER TABLE transactions RENAME TO transactions_old',
-          );
+        if (oldVersion < 4) {
+          // Add transaction_attachments table with INTEGER transaction_id
+          await db.execute('DROP TABLE IF EXISTS transaction_attachments');
           await db.execute('''
-            CREATE TABLE transactions (
+            CREATE TABLE transaction_attachments (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
-              title TEXT,
-              amount REAL NOT NULL,
-              type TEXT NOT NULL,
-              category_id INTEGER NOT NULL,
-              account_id INTEGER NOT NULL,
-              date TEXT NOT NULL,
-              description TEXT,
-              FOREIGN KEY (category_id) REFERENCES categories (id),
-              FOREIGN KEY (account_id) REFERENCES accounts (id)
+              transaction_id INTEGER NOT NULL,
+              file_path TEXT NOT NULL,
+              file_name TEXT NOT NULL,
+              file_type TEXT NOT NULL,
+              file_size INTEGER NOT NULL,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY (transaction_id) REFERENCES transactions (id)
             )
           ''');
-          await db.execute('''
-            INSERT INTO transactions (id, amount, type, category_id, account_id, date, description, title)
-            SELECT id, amount * 1.0, type, category AS category_id, account_id, date, comment AS description, 
-              CASE WHEN instr(GROUP_CONCAT(name), 'title') > 0 THEN title ELSE '' END as title
-            FROM transactions_old
-          ''');
-          await db.execute('DROP TABLE transactions_old');
-          // Пересчитываем балансы для всех счетов
-          final accounts = await db.query('accounts');
-          for (final account in accounts) {
-            final accountId = account['id'] as int;
-            final result = await db.rawQuery(
-              'SELECT SUM(amount) as total FROM transactions WHERE account_id = ?',
-              [accountId],
-            );
-            final total = result.first['total'] ?? 0.0;
-            await db.update(
-              'accounts',
-              {'balance': total},
-              where: 'id = ?',
-              whereArgs: [accountId],
-            );
-          }
-        }
-        if (oldVersion < 4) {
-          // Добавляем поле title в transactions, если его нет
-          await db.execute('ALTER TABLE transactions ADD COLUMN title TEXT');
-        }
-        // Гарантируем, что поле title есть в старой таблице
-        try {
-          await db.execute(
-            'ALTER TABLE transactions_old ADD COLUMN title TEXT DEFAULT ""',
-          );
-        } catch (e) {
-          // Если поле уже есть, игнорируем ошибку
         }
         if (oldVersion < 5) {
-          // Добавляем поле isDefault в categories, если его нет
-          await db.execute(
-            'ALTER TABLE categories ADD COLUMN isDefault INTEGER NOT NULL DEFAULT 0',
-          );
+          // Remove balance field from accounts table
+          await db.execute('ALTER TABLE accounts DROP COLUMN balance');
+        }
+        if (oldVersion < 6) {
+          // Update transaction_attachments table to use TEXT transaction_id
+          await db.execute('DROP TABLE IF EXISTS transaction_attachments');
+          await db.execute('''
+            CREATE TABLE transaction_attachments (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              transaction_id TEXT NOT NULL,
+              file_path TEXT NOT NULL,
+              file_name TEXT NOT NULL,
+              file_type TEXT NOT NULL,
+              file_size INTEGER NOT NULL,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY (transaction_id) REFERENCES transactions (id)
+            )
+          ''');
+        }
+        if (oldVersion < 7) {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS services (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT NOT NULL
+            )
+          ''');
+          await _ensureDefaultServices(db);
         }
         await ensureDefaultCategories(db);
       },
@@ -163,6 +159,23 @@ class DatabaseService {
   static Future<List<Map<String, dynamic>>> getAllAccounts() async {
     final db = await database;
     return await db.query('accounts');
+  }
+
+  static Future<double> calculateAccountBalance(int accountId) async {
+    final db = await database;
+    final result = await db.rawQuery(
+      'SELECT SUM(amount) as total FROM transactions WHERE account_id = ?',
+      [accountId],
+    );
+    return (result.first['total'] as num?)?.toDouble() ?? 0.0;
+  }
+
+  static Future<double> calculateTotalBalance() async {
+    final db = await database;
+    final result = await db.rawQuery(
+      'SELECT SUM(amount) as total FROM transactions',
+    );
+    return (result.first['total'] as num?)?.toDouble() ?? 0.0;
   }
 
   static Future<int> updateAccount(Map<String, dynamic> data) async {
@@ -203,21 +216,6 @@ class DatabaseService {
   }
 
   // --- Transactions ---
-  static Future<void> _recalculateAccountBalance(int accountId) async {
-    final db = await database;
-    final result = await db.rawQuery(
-      'SELECT SUM(amount) as total FROM transactions WHERE account_id = ?',
-      [accountId],
-    );
-    final total = result.first['total'] ?? 0.0;
-    await db.update(
-      'accounts',
-      {'balance': total},
-      where: 'id = ?',
-      whereArgs: [accountId],
-    );
-  }
-
   static Future<int> insertTransaction(Map<String, dynamic> data) async {
     final db = await database;
     // Гарантируем, что amount — double
@@ -228,9 +226,6 @@ class DatabaseService {
       data['amount'] = (data['amount'] as int).toDouble();
     }
     final id = await db.insert('transactions', data);
-    if (data['account_id'] != null) {
-      await _recalculateAccountBalance(data['account_id'] as int);
-    }
     return id;
   }
 
@@ -254,9 +249,6 @@ class DatabaseService {
       where: 'id = ?',
       whereArgs: [data['id']],
     );
-    if (data['account_id'] != null) {
-      await _recalculateAccountBalance(data['account_id'] as int);
-    }
     return result;
   }
 
@@ -287,9 +279,6 @@ class DatabaseService {
       where: 'id = ?',
       whereArgs: [id],
     );
-    if (accountId != null) {
-      await _recalculateAccountBalance(accountId);
-    }
     return result;
   }
 
@@ -449,7 +438,7 @@ class DatabaseService {
   }
 
   static Future<List<Map<String, dynamic>>> getAttachmentsByTransaction(
-    int transactionId,
+    String transactionId,
   ) async {
     final db = await database;
     return await db.query(
@@ -477,5 +466,149 @@ class DatabaseService {
       whereArgs: [id],
     );
     return result.isNotEmpty ? result.first : null;
+  }
+
+  static Future<void> _ensureDefaultServices(Database db) async {
+    final defaultServices = [
+      'Самокат',
+      'Яндекс Еда',
+      'Яндекс.Еда',
+      'Delivery Club',
+      'Деливери Клаб',
+      'Ozon',
+      'Wildberries',
+      'ВкусВилл',
+      'Лента',
+      'Перекрёсток',
+      'Пятёрочка',
+      'Магнит',
+      'СберМаркет',
+      'Лавка',
+      'СберМегаМаркет',
+      'М.Видео',
+      'Эльдорадо',
+      'AliExpress',
+      'iHerb',
+      'Кухня на районе',
+      'Додо Пицца',
+      'Papa Johns',
+      'KFC',
+      'Макдоналдс',
+      'McDonalds',
+      'Burger King',
+      'Почта России',
+      'Boxberry',
+      'СДЭК',
+      'Lamoda',
+      'Ostrovok',
+      'Booking',
+      'Aviasales',
+      'Ашан',
+      'Glovo',
+      'Яндекс Go',
+      'Яндекс Такси',
+      'Uber',
+      'Gett',
+      'Ситимобил',
+      'Тануки',
+      'Якитория',
+      'Суши Wok',
+      'Суши Шоп',
+      'Суши Мастер',
+      'Планета Суши',
+      'Kari',
+      'DNS',
+      'Связной',
+      'МТС',
+      'Билайн',
+      'Мегафон',
+      'Теле2',
+      'Ростелеком',
+      'Тинькофф',
+      'Сбербанк',
+      'Альфа-Банк',
+      'ВТБ',
+      'Райффайзен',
+      'Почта Банк',
+      'Росбанк',
+      'Газпромбанк',
+      'Открытие',
+      'Home Credit',
+      'Ренессанс Кредит',
+      'Совкомбанк',
+      'ЮMoney',
+      'Qiwi',
+      'WebMoney',
+      'PayPal',
+      'Apple',
+      'Google',
+      'PlayStation',
+      'Xbox',
+      'Steam',
+      'Epic Games',
+      'Nintendo',
+      'Spotify',
+      'YouTube',
+      'Netflix',
+      'IVI',
+      'Okko',
+      'Кинопоиск',
+      'Amediateka',
+      'START',
+      'Premier',
+      'More.tv',
+      'Megogo',
+      'Wink',
+      'Rutube',
+      'Яндекс Плюс',
+      'VK',
+      'Одноклассники',
+      'Mail.ru',
+      'VK Музыка',
+      'VK Видео',
+      'VK Combo',
+      'VK Play',
+      'VK Cloud',
+      'VK Mini Apps',
+      'VK Pay',
+      'VK Звонки',
+      'VK Капсула',
+      'VK Мессенджер',
+      'VK Работа',
+      'VK Travel',
+      'VK Бизнес',
+      'VK Донаты',
+      'VK Клипы',
+      'VK Новости',
+      'VK Почта',
+      'VK Приложения',
+      'VK Реклама',
+      'VK Сервисы',
+      'VK Сообщества',
+      'VK Спорт',
+      'VK Стриминг',
+      'VK Фото',
+      'VK Чаты',
+      'VK Шоу',
+      'VK Экспресс',
+      'VK Эксперт',
+      'VK Экспо',
+    ];
+    for (final name in defaultServices) {
+      final result = await db.query(
+        'services',
+        where: 'name = ?',
+        whereArgs: [name],
+      );
+      if (result.isEmpty) {
+        await db.insert('services', {'name': name});
+      }
+    }
+  }
+
+  static Future<List<String>> getAllServices() async {
+    final db = await database;
+    final result = await db.query('services');
+    return result.map((row) => row['name'] as String).toList();
   }
 }
